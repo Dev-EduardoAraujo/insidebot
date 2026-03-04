@@ -622,6 +622,30 @@ class LicenseHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             raise ValueError("invalid_json")
 
+    def _read_login_payload(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        ctype = self.headers.get("Content-Type", "").lower()
+        text = raw.decode("utf-8", errors="ignore")
+        if "application/json" in ctype:
+            try:
+                return json.loads(text) if text.strip() else {}
+            except json.JSONDecodeError:
+                raise ValueError("invalid_json")
+        if "application/x-www-form-urlencoded" in ctype:
+            parsed = parse_qs(text, keep_blank_values=True)
+            return {k: (v[0] if isinstance(v, list) and v else "") for k, v in parsed.items()}
+        # fallback: try JSON first, then querystring style
+        try:
+            return json.loads(text) if text.strip() else {}
+        except json.JSONDecodeError:
+            parsed = parse_qs(text, keep_blank_values=True)
+            if parsed:
+                return {k: (v[0] if isinstance(v, list) and v else "") for k, v in parsed.items()}
+        return {}
+
     def _get_bearer_token(self):
         auth = self.headers.get("Authorization", "").strip()
         if not auth.lower().startswith("bearer "):
@@ -715,7 +739,7 @@ class LicenseHandler(BaseHTTPRequestHandler):
 
         if path == "/api/v1/admin/auth/login":
             try:
-                payload = self._read_json()
+                payload = self._read_login_payload()
             except ValueError:
                 self._send_json(400, {"ok": False, "error": "invalid_json"})
                 return
@@ -726,7 +750,17 @@ class LicenseHandler(BaseHTTPRequestHandler):
             if not expected_pass:
                 self._send_json(500, {"ok": False, "error": "admin_password_not_configured"})
                 return
-            if username != expected_user or password != expected_pass:
+            if not username:
+                username = expected_user
+            user_ok = username.lower() == str(expected_user).strip().lower()
+            pass_ok = password == str(expected_pass)
+            if not user_ok or not pass_ok:
+                logging.warning(
+                    "admin login denied user=%s payload_keys=%s ip=%s",
+                    username,
+                    ",".join(sorted([str(k) for k in payload.keys()])),
+                    self.client_address[0] if self.client_address else "",
+                )
                 self._send_json(401, {"ok": False, "error": "invalid_credentials"})
                 return
             token, expires_at = self.server.create_session(username)
