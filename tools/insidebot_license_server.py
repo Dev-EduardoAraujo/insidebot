@@ -1,0 +1,668 @@
+#!/usr/bin/env python3
+"""
+InsideBot License Server
+
+Compatible with InsideBot.mq5 license validation flow:
+POST /api/v1/license/validate
+"""
+
+import argparse
+import json
+import logging
+import os
+import sqlite3
+import threading
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def to_iso_utc(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_bool(value, default=False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
+def parse_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = [str(x).strip() for x in value]
+    else:
+        text = str(value).replace("\n", ",").replace(";", ",")
+        items = [x.strip() for x in text.split(",")]
+    out = []
+    seen = set()
+    for item in items:
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def parse_expiry_utc(value) -> datetime:
+    if value is None:
+        raise ValueError("expires_at is required")
+
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError("expires_at is empty")
+
+    if text.isdigit():
+        return datetime.fromtimestamp(float(text), tz=timezone.utc)
+
+    iso_text = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(iso_text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        pass
+
+    datetime_formats = [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y.%m.%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y.%m.%d",
+    ]
+    for fmt in datetime_formats:
+        try:
+            parsed = datetime.strptime(text, fmt)
+            if fmt in {"%Y-%m-%d", "%Y.%m.%d"}:
+                parsed = parsed.replace(hour=23, minute=59, second=59)
+            return parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+
+    raise ValueError(f"unsupported expires_at format: {text}")
+
+
+class LicenseStore:
+    def __init__(self, db_path: Path):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
+        self._init_db()
+
+    def _connect(self):
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS licenses (
+                    token TEXT PRIMARY KEY,
+                    customer_name TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    revoked INTEGER NOT NULL DEFAULT 0,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    allowed_logins TEXT NOT NULL DEFAULT '[]',
+                    allowed_servers TEXT NOT NULL DEFAULT '[]',
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_seen_at TEXT,
+                    last_login TEXT,
+                    last_server TEXT,
+                    last_program TEXT,
+                    last_build TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS validation_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token TEXT NOT NULL,
+                    event_time TEXT NOT NULL,
+                    login TEXT,
+                    server TEXT,
+                    company TEXT,
+                    account_name TEXT,
+                    program TEXT,
+                    build TEXT,
+                    allowed INTEGER NOT NULL,
+                    revoked INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    remote_ip TEXT,
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_validation_events_token_time ON validation_events(token, event_time DESC)"
+            )
+            conn.commit()
+
+    @staticmethod
+    def _row_to_license(row):
+        if row is None:
+            return None
+        allowed_logins = json.loads(row["allowed_logins"]) if row["allowed_logins"] else []
+        allowed_servers = json.loads(row["allowed_servers"]) if row["allowed_servers"] else []
+        return {
+            "token": row["token"],
+            "customer_name": row["customer_name"],
+            "expires_at": row["expires_at"],
+            "revoked": bool(row["revoked"]),
+            "active": bool(row["active"]),
+            "allowed_logins": allowed_logins,
+            "allowed_servers": allowed_servers,
+            "notes": row["notes"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "last_seen_at": row["last_seen_at"],
+            "last_login": row["last_login"],
+            "last_server": row["last_server"],
+            "last_program": row["last_program"],
+            "last_build": row["last_build"],
+        }
+
+    def get_license(self, token: str):
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM licenses WHERE token = ?", (token,)).fetchone()
+            return self._row_to_license(row)
+
+    def upsert_license(self, payload: dict):
+        token = str(payload.get("token", "")).strip()
+        if not token:
+            raise ValueError("token is required")
+
+        customer_name = str(payload.get("customer_name", "")).strip() or "Cliente InsideBot"
+        expires_at = parse_expiry_utc(payload.get("expires_at"))
+        allowed_logins = parse_list(payload.get("allowed_logins"))
+        allowed_servers = [x.lower() for x in parse_list(payload.get("allowed_servers"))]
+        revoked = parse_bool(payload.get("revoked"), False)
+        active = parse_bool(payload.get("active"), True)
+        notes = str(payload.get("notes", "")).strip()
+        now = to_iso_utc(utc_now())
+
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO licenses(
+                    token, customer_name, expires_at, revoked, active,
+                    allowed_logins, allowed_servers, notes,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(token) DO UPDATE SET
+                    customer_name = excluded.customer_name,
+                    expires_at = excluded.expires_at,
+                    revoked = excluded.revoked,
+                    active = excluded.active,
+                    allowed_logins = excluded.allowed_logins,
+                    allowed_servers = excluded.allowed_servers,
+                    notes = excluded.notes,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    token,
+                    customer_name,
+                    to_iso_utc(expires_at),
+                    1 if revoked else 0,
+                    1 if active else 0,
+                    json.dumps(allowed_logins, separators=(",", ":")),
+                    json.dumps(allowed_servers, separators=(",", ":")),
+                    notes,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        return self.get_license(token)
+
+    def revoke_license(self, token: str, revoked: bool = True):
+        token = str(token).strip()
+        if not token:
+            raise ValueError("token is required")
+        with self._write_lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE licenses SET revoked = ?, updated_at = ? WHERE token = ?",
+                (1 if revoked else 0, to_iso_utc(utc_now()), token),
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                raise ValueError("token not found")
+        return self.get_license(token)
+
+    def extend_license(self, token: str, days=None, expires_at=None):
+        token = str(token).strip()
+        if not token:
+            raise ValueError("token is required")
+
+        current = self.get_license(token)
+        if current is None:
+            raise ValueError("token not found")
+
+        if expires_at is not None:
+            new_expiry = parse_expiry_utc(expires_at)
+        else:
+            if days is None:
+                raise ValueError("days or expires_at is required")
+            try:
+                add_days = int(days)
+            except (TypeError, ValueError):
+                raise ValueError("days must be integer")
+            if add_days == 0:
+                raise ValueError("days must be non-zero")
+            base = parse_expiry_utc(current["expires_at"])
+            now = utc_now()
+            if base < now:
+                base = now
+            new_expiry = base + timedelta(days=add_days)
+
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE licenses SET expires_at = ?, updated_at = ? WHERE token = ?",
+                (to_iso_utc(new_expiry), to_iso_utc(utc_now()), token),
+            )
+            conn.commit()
+
+        return self.get_license(token)
+
+    def list_licenses(self, limit=200, offset=0, token=None):
+        limit = max(1, min(int(limit), 1000))
+        offset = max(0, int(offset))
+        params = []
+        where = ""
+        if token:
+            where = "WHERE token = ?"
+            params.append(token)
+        with self._connect() as conn:
+            total = conn.execute(f"SELECT COUNT(*) AS c FROM licenses {where}", params).fetchone()["c"]
+            rows = conn.execute(
+                f"SELECT * FROM licenses {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+            items = [self._row_to_license(row) for row in rows]
+        return {"total": int(total), "items": items}
+
+    def list_events(self, limit=200, offset=0, token=None):
+        limit = max(1, min(int(limit), 1000))
+        offset = max(0, int(offset))
+        params = []
+        where = ""
+        if token:
+            where = "WHERE token = ?"
+            params.append(token)
+
+        with self._connect() as conn:
+            total = conn.execute(f"SELECT COUNT(*) AS c FROM validation_events {where}", params).fetchone()["c"]
+            rows = conn.execute(
+                f"""
+                SELECT id, token, event_time, login, server, company, account_name, program, build,
+                       allowed, revoked, status, message, remote_ip
+                FROM validation_events
+                {where}
+                ORDER BY id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, limit, offset),
+            ).fetchall()
+        items = []
+        for row in rows:
+            items.append(
+                {
+                    "id": row["id"],
+                    "token": row["token"],
+                    "event_time": row["event_time"],
+                    "login": row["login"],
+                    "server": row["server"],
+                    "company": row["company"],
+                    "account_name": row["account_name"],
+                    "program": row["program"],
+                    "build": row["build"],
+                    "allowed": bool(row["allowed"]),
+                    "revoked": bool(row["revoked"]),
+                    "status": row["status"],
+                    "message": row["message"],
+                    "remote_ip": row["remote_ip"],
+                }
+            )
+        return {"total": int(total), "items": items}
+
+    def _record_event(self, payload: dict, response: dict, remote_ip: str):
+        login = str(payload.get("login", "")).strip()
+        server = str(payload.get("server", "")).strip()
+        company = str(payload.get("company", "")).strip()
+        account_name = str(payload.get("name", "")).strip()
+        program = str(payload.get("program", "")).strip()
+        build = str(payload.get("build", "")).strip()
+        token = str(payload.get("token", "")).strip()
+
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO validation_events(
+                    token, event_time, login, server, company, account_name, program, build,
+                    allowed, revoked, status, message, remote_ip, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    token,
+                    to_iso_utc(utc_now()),
+                    login,
+                    server,
+                    company,
+                    account_name,
+                    program,
+                    build,
+                    1 if response.get("allowed") else 0,
+                    1 if response.get("revoked") else 0,
+                    response.get("status", ""),
+                    response.get("message", ""),
+                    remote_ip,
+                    json.dumps(payload, ensure_ascii=True),
+                ),
+            )
+            conn.commit()
+
+    def validate(self, payload: dict, remote_ip: str):
+        token = str(payload.get("token", "")).strip()
+        login = str(payload.get("login", "")).strip()
+        server_name = str(payload.get("server", "")).strip()
+
+        response = {
+            "allowed": False,
+            "revoked": False,
+            "customer_name": "",
+            "expires_at": "",
+            "message": "",
+            "status": "DENIED",
+        }
+
+        if not token:
+            response["message"] = "token_missing"
+            response["status"] = "TOKEN_MISSING"
+            self._record_event(payload, response, remote_ip)
+            return response
+
+        license_row = self.get_license(token)
+        if license_row is None:
+            response["message"] = "token_not_found"
+            response["status"] = "TOKEN_NOT_FOUND"
+            self._record_event(payload, response, remote_ip)
+            return response
+
+        response["customer_name"] = license_row["customer_name"]
+        response["expires_at"] = license_row["expires_at"]
+
+        if not license_row["active"]:
+            response["message"] = "license_disabled"
+            response["status"] = "DISABLED"
+            self._record_event(payload, response, remote_ip)
+            return response
+
+        if license_row["revoked"]:
+            response["revoked"] = True
+            response["message"] = "license_revoked"
+            response["status"] = "REVOKED"
+            self._record_event(payload, response, remote_ip)
+            return response
+
+        expiry_dt = parse_expiry_utc(license_row["expires_at"])
+        if utc_now() > expiry_dt:
+            response["message"] = "license_expired"
+            response["status"] = "EXPIRED"
+            self._record_event(payload, response, remote_ip)
+            return response
+
+        if license_row["allowed_logins"]:
+            if login == "" or login not in [str(x) for x in license_row["allowed_logins"]]:
+                response["message"] = "login_not_allowed"
+                response["status"] = "LOGIN_NOT_ALLOWED"
+                self._record_event(payload, response, remote_ip)
+                return response
+
+        if license_row["allowed_servers"]:
+            normalized_server = server_name.lower()
+            allowed_servers = [str(x).lower() for x in license_row["allowed_servers"]]
+            if normalized_server == "" or normalized_server not in allowed_servers:
+                response["message"] = "server_not_allowed"
+                response["status"] = "SERVER_NOT_ALLOWED"
+                self._record_event(payload, response, remote_ip)
+                return response
+
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE licenses
+                SET last_seen_at = ?, last_login = ?, last_server = ?, last_program = ?, last_build = ?, updated_at = ?
+                WHERE token = ?
+                """,
+                (
+                    to_iso_utc(utc_now()),
+                    login,
+                    server_name,
+                    str(payload.get("program", "")).strip(),
+                    str(payload.get("build", "")).strip(),
+                    to_iso_utc(utc_now()),
+                    token,
+                ),
+            )
+            conn.commit()
+
+        response["allowed"] = True
+        response["message"] = "ok"
+        response["status"] = "VALID"
+        self._record_event(payload, response, remote_ip)
+        return response
+
+
+class LicenseHTTPServer(ThreadingHTTPServer):
+    def __init__(self, server_address, handler_class, store: LicenseStore, admin_key: str):
+        super().__init__(server_address, handler_class)
+        self.store = store
+        self.admin_key = admin_key
+
+
+class LicenseHandler(BaseHTTPRequestHandler):
+    server_version = "InsideBotLicenseServer/1.0"
+
+    def log_message(self, fmt, *args):
+        logging.info("%s - %s", self.address_string(), fmt % args)
+
+    def _send_json(self, code: int, payload: dict):
+        body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError:
+            raise ValueError("invalid_json")
+
+    def _require_admin(self):
+        admin_key = getattr(self.server, "admin_key", "")
+        if not admin_key:
+            self._send_json(500, {"ok": False, "error": "admin_key_not_configured"})
+            return False
+        sent_key = self.headers.get("X-Admin-Key", "")
+        if sent_key != admin_key:
+            self._send_json(401, {"ok": False, "error": "unauthorized"})
+            return False
+        return True
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        if path in {"/api/health", "/api/v1/health"}:
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "service": "insidebot-license-server",
+                    "time_utc": to_iso_utc(utc_now()),
+                },
+            )
+            return
+
+        if path == "/api/v1/admin/licenses":
+            if not self._require_admin():
+                return
+            limit = int(query.get("limit", ["200"])[0])
+            offset = int(query.get("offset", ["0"])[0])
+            token = query.get("token", [""])[0].strip() or None
+            result = self.server.store.list_licenses(limit=limit, offset=offset, token=token)
+            self._send_json(200, {"ok": True, **result})
+            return
+
+        if path == "/api/v1/admin/events":
+            if not self._require_admin():
+                return
+            limit = int(query.get("limit", ["200"])[0])
+            offset = int(query.get("offset", ["0"])[0])
+            token = query.get("token", [""])[0].strip() or None
+            result = self.server.store.list_events(limit=limit, offset=offset, token=token)
+            self._send_json(200, {"ok": True, **result})
+            return
+
+        self._send_json(404, {"ok": False, "error": "not_found"})
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/v1/license/validate":
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._send_json(400, {"allowed": False, "revoked": False, "message": "invalid_json", "status": "BAD_JSON"})
+                return
+            remote_ip = self.client_address[0] if self.client_address else ""
+            result = self.server.store.validate(payload, remote_ip)
+            self._send_json(200, result)
+            return
+
+        if path == "/api/v1/admin/license/upsert":
+            if not self._require_admin():
+                return
+            try:
+                payload = self._read_json()
+                row = self.server.store.upsert_license(payload)
+                self._send_json(200, {"ok": True, "license": row})
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+
+        if path == "/api/v1/admin/license/revoke":
+            if not self._require_admin():
+                return
+            try:
+                payload = self._read_json()
+                token = str(payload.get("token", "")).strip()
+                revoked = parse_bool(payload.get("revoked"), True)
+                row = self.server.store.revoke_license(token, revoked=revoked)
+                self._send_json(200, {"ok": True, "license": row})
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+
+        if path == "/api/v1/admin/license/extend":
+            if not self._require_admin():
+                return
+            try:
+                payload = self._read_json()
+                token = str(payload.get("token", "")).strip()
+                days = payload.get("days")
+                expires_at = payload.get("expires_at")
+                row = self.server.store.extend_license(token, days=days, expires_at=expires_at)
+                self._send_json(200, {"ok": True, "license": row})
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+
+        self._send_json(404, {"ok": False, "error": "not_found"})
+
+
+def main():
+    parser = argparse.ArgumentParser(description="InsideBot license server")
+    parser.add_argument("--host", default=os.getenv("INSIDEBOT_LICENSE_HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("INSIDEBOT_LICENSE_PORT", "8090")))
+    parser.add_argument(
+        "--db-path",
+        default=os.getenv("INSIDEBOT_LICENSE_DB", str(Path("tools") / "license_data" / "licenses.db")),
+    )
+    parser.add_argument("--admin-key", default=os.getenv("INSIDEBOT_LICENSE_ADMIN_KEY", ""))
+    parser.add_argument("--log-level", default=os.getenv("INSIDEBOT_LICENSE_LOG_LEVEL", "INFO"))
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, str(args.log_level).upper(), logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
+    db_path = Path(args.db_path)
+    store = LicenseStore(db_path)
+    server = LicenseHTTPServer((args.host, args.port), LicenseHandler, store, admin_key=args.admin_key)
+
+    if not args.admin_key:
+        logging.warning("INSIDEBOT_LICENSE_ADMIN_KEY not set. Admin endpoints will return unauthorized.")
+
+    logging.info("InsideBot license server listening on %s:%s", args.host, args.port)
+    logging.info("DB: %s", db_path.resolve())
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logging.info("Shutdown requested")
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
+

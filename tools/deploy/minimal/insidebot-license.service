@@ -1,0 +1,19 @@
+[Unit]
+Description=InsideBot License Server (minimal VPS)
+After=network.target
+
+[Service]
+Type=simple
+User=insidebot
+Group=insidebot
+WorkingDirectory=/opt/insidebot-license
+EnvironmentFile=/etc/insidebot-license.env
+ExecStart=/usr/bin/python3 /opt/insidebot-license/insidebot_license_server.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

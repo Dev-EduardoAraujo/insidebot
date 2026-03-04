@@ -1,0 +1,432 @@
+# Guia Indispensável para Validar EA MT5 (Hantec) — XAUUSD + USDJPY (LIMIT-only)
+
+> Objetivo: garantir que o desempenho do backtest **não descole** no live por motivos **operacionais/técnicos** (execução, corretora, plataforma, infraestrutura), **excluindo** fatores de mercado e da estratégia.
+>
+> Contexto fixo:
+> - Broker: **Hantec (MT5)**
+> - Símbolos: **XAUUSD** e **USDJPY** (atenção a sufixos: `.m`, `.pro`, etc.)
+> - Ordens: **somente LIMIT (pending)**
+> - Sem: trailing stop / break-even logic
+> - Uso: validar robustez de execução e reduzir diferenças backtest vs live
+
+---
+
+## 1) Premissas e Regras de Ouro
+
+1. **Backtest nunca é live.** O Strategy Tester simplifica: fila de ordens, micro-liquidez, recusa, partial fill e latência.
+2. Em LIMIT-only, o maior vilão é: **touch ≠ fill** (preço toca sua LIMIT, mas ela não executa).
+3. O segundo vilão é: **spread variável** (especialmente no XAUUSD).
+4. O terceiro vilão é: **regras do broker/símbolo** (stop level, freeze level, tick size, filling mode).
+5. O EA precisa ser **determinístico e auditável**: logs completos, métricas de execução e reconciliação de estado.
+
+---
+
+## 2) Diferenças Operacionais que Mudam o Resultado no LIVE (mesmo com LIMIT)
+
+### 2.1 Touch ≠ Fill (fila + liquidez)
+- No tester: tocou o preço → executa.
+- No live: precisa ter liquidez **naquele preço** e sua ordem estar “na vez”.
+- Impacto: menos trades executados; entradas “perdidas”; PnL e taxa de acerto mudam.
+
+**Indispensável analisar:**
+- Quantas LIMIT foram **tocadas** vs **preenchidas**.
+- Tempo médio “touch→fill”.
+- Frequência de “touch e não fill” por símbolo e horário.
+
+---
+
+### 2.2 Partial Fill (preenchimento parcial)
+- Pode ocorrer em contas/servidores com certos **filling modes**.
+- Impacto: posição parcial muda gerenciamento e risco.
+
+**Indispensável:**
+- EA tratar `partial fill` sem duplicar ordens/posições.
+- Reconciliação correta de volume restante.
+
+---
+
+### 2.3 Spread variável e “spread shock”
+Mesmo com LIMIT, o spread altera:
+- Condição de toque/execução (BID/ASK).
+- Custos e probabilidade de fill.
+- Saídas (dependendo de como fecha).
+
+**Indispensável:**
+- Testar cenários com spread maior que o “normal”.
+- Monitorar spread ao longo do dia (principalmente rollover).
+
+---
+
+### 2.4 Rejeições e retcodes (corretora/servidor)
+No live, erros são comuns:
+- `REJECT`, `OFF_QUOTES`, `INVALID_PRICE`, `INVALID_STOPS`, `MARKET_CLOSED`, `TRADE_DISABLED`, `TRADE_CONTEXT_BUSY` etc.
+
+**Indispensável:**
+- Retentativas com backoff (sem loop infinito).
+- Tratamento específico por retcode.
+- Nunca “assumir que entrou” sem confirmação.
+
+---
+
+### 2.5 Latência e timing real
+Mesmo com LIMIT:
+- envio/cancelamento/modificação chegam atrasados;
+- eventos podem ocorrer entre ticks.
+
+**Indispensável:**
+- EA robusto a atraso e a execuções em ordem diferente.
+- Idempotência de ações (não duplicar).
+
+---
+
+### 2.6 Stop Level / Freeze Level
+Broker pode bloquear:
+- criação/alteração/cancelamento perto do preço (freeze).
+- SL/TP muito próximos (stop level).
+
+**Indispensável:**
+- Consultar níveis do símbolo e respeitar em runtime.
+- Ajustar preço/SL/TP para limites mínimos.
+
+---
+
+### 2.7 Tick size, digits e normalização de preço
+Diferenças pequenas quebram ordens no live:
+- preço não alinhado ao tick size;
+- arredondamento errado;
+- sufixos mudam contrato e regras.
+
+**Indispensável:**
+- Normalizar preço/SL/TP/TP para o tick size do símbolo.
+- Validar digits e step.
+
+---
+
+## 3) Checklist de Propriedades do Símbolo (ler em runtime e validar)
+
+Para cada símbolo (XAUUSD, USDJPY), ler e validar:
+
+### 3.1 Volume
+- `SYMBOL_VOLUME_MIN`
+- `SYMBOL_VOLUME_MAX`
+- `SYMBOL_VOLUME_STEP`
+
+Regras:
+- Sempre ajustar volume para `min + k*step`.
+- Nunca enviar volume fora do range.
+
+### 3.2 Preço e tick
+- `SYMBOL_POINT`
+- `SYMBOL_DIGITS`
+- `SYMBOL_TRADE_TICK_SIZE` (ou equivalente)
+- `SYMBOL_TRADE_TICK_VALUE` (para auditoria)
+
+Regras:
+- `price = round_to_tick(price)`
+- SL/TP também.
+
+### 3.3 Execução / trading
+- `SYMBOL_TRADE_STOPS_LEVEL` (stop level)
+- `SYMBOL_TRADE_FREEZE_LEVEL` (freeze level)
+- `SYMBOL_TRADE_MODE` (trade permitido)
+- `SYMBOL_TRADE_EXECUTION` (tipo execução)
+- `SYMBOL_FILLING_MODE` (FOK/IOC/RETURN)
+
+Regras:
+- Respeitar stop/freeze sempre.
+- Se o símbolo não permitir o filling mode escolhido, ajustar.
+
+---
+
+## 4) Arquitetura do EA: Estado, Idempotência e Reconciliação
+
+### 4.1 Princípio: “Servidor é a verdade”
+Nunca confiar somente no estado interno do EA.
+
+**Indispensável:**
+- Em cada tick (ou em timer), reconciliação:
+  - ordens pendentes abertas;
+  - posições abertas;
+  - deals recentes;
+  - histórico de transações.
+
+### 4.2 Idempotência (evitar duplicidade)
+- Ao enviar LIMIT: anexar um identificador (ex.: `magic + tag + timestamp`) e manter um mapa local de intenção.
+- Antes de reenviar: verificar se já existe ordem semelhante ativa.
+
+### 4.3 Controle de concorrência de trade
+- Evitar múltiplos `OrderSend` simultâneos.
+- Serializar ações: enviar/cancelar/modificar.
+
+### 4.4 Tratamento de eventos e retcodes
+- Toda ação deve:
+  1) tentar
+  2) ler `retcode`
+  3) decidir: sucesso, retry, abort, ou re-sync.
+
+---
+
+## 5) Regras Específicas para LIMIT-only (o que o EA precisa garantir)
+
+### 5.1 Definição exata de “tocou”
+No live:
+- BUY LIMIT executa no ASK chegando no preço.
+- SELL LIMIT executa no BID chegando no preço.
+
+**Indispensável:**
+- Regras corretas BID/ASK no gatilho.
+- Registros de:
+  - preço BID/ASK no momento do touch
+  - spread no momento.
+
+### 5.2 Cancelamento/Reposicionamento
+Se o EA cancela e recoloca ordens:
+- freeze level pode impedir;
+- latência pode fazer cancelar tarde.
+
+**Indispensável:**
+- Checar freeze antes de cancelar/modificar.
+- Evitar “flapping” (cancela/recoloca a cada tick).
+
+### 5.3 Expiração
+- Expiração depende do horário do servidor.
+- DST e timezone podem alterar.
+
+**Indispensável:**
+- Definir expirations usando tempo do servidor (não do PC).
+- Logar `TimeTradeServer()` e offsets.
+
+---
+
+## 6) Plano Profissional de Testes (para aproximar Backtest do Live)
+
+### 6.1 Backtest A (Base)
+- Model: **Every tick based on real ticks**
+- Spread: **Current** (ou o mais real possível)
+- Objetivo: validar lógica e consistência.
+
+### 6.2 Backtest B (Stress)
+Executar 2–3 cenários, por símbolo:
+- Spread +30%
+- Spread +70% (janelas específicas)
+Objetivo: medir sensibilidade do EA a spread.
+
+### 6.3 Backtest C (Execution Emulator — recomendado)
+Adicionar um “modo emulação” no EA **apenas no tester**:
+- Probabilidade de LIMIT tocar e não preencher (FillMissProb: 10–35%)
+- Latência artificial (50–250ms) via fila de ações (preferível a Sleep)
+- Rejeição de trade (1–5%) para testar robustez
+- Partial fill (ex.: 10–25%) se aplicável
+- Slippage apenas nas saídas (se usar market close/SL/TP)
+
+> Esse modo não altera a estratégia; apenas simula fricções do live.
+
+### 6.4 Forward Test DEMO (Hantec)
+- DEMO na **mesma Hantec** (mesmo servidor e tipo de conta).
+- Rodar mínimo 2–4 semanas.
+- Métricas comparativas vs Backtest C:
+  - #trades
+  - touch/fill
+  - fill delay
+  - retcodes
+  - PnL por trade
+  - drawdown e distribuição de resultados
+
+### 6.5 Micro-conta / Cent / Live pequeno
+Antes do full size:
+- rodar com risco mínimo por 2–4 semanas.
+
+---
+
+## 7) Métricas Indispensáveis (o EA deve logar)
+
+### 7.1 Logs por tentativa de ação
+Para cada OrderSend/Cancel/Modify:
+- timestamp servidor
+- símbolo
+- tipo (BUY LIMIT / SELL LIMIT / cancel / modify)
+- preço, SL, TP, volume
+- BID/ASK/spread do momento
+- retcode + comentário
+- order ticket retornado
+- tempo até confirmação (ms se possível)
+
+### 7.2 Métricas de execução (por ordem LIMIT)
+- `touch_count`
+- `fill_count`
+- `miss_fill_count`
+- `avg_touch_to_fill_ms`
+- `partial_fill_count`
+- `avg_slippage_exit_points` (se aplicável)
+
+### 7.3 Métricas de estabilidade
+- desconexões
+- requotes/offquotes
+- trade_context_busy
+- quantas retentativas e sucesso posterior
+
+### 7.4 Reconciliação
+- divergências detectadas entre estado interno e servidor
+- ações corretivas executadas (resync)
+
+---
+
+## 8) Tratamento de Erros: Política de Retry (obrigatório)
+
+Definir política padrão:
+- max retries por ação (ex.: 3–7)
+- backoff (ex.: 200ms, 500ms, 1200ms…)
+- condições de abort (ex.: MARKET_CLOSED, TRADE_DISABLED)
+- condições de resync (ex.: TRADE_CONTEXT_BUSY repetido)
+
+**Indispensável:**
+- Nunca entrar em loop infinito.
+- Nunca multiplicar ordens por falha de confirmação.
+
+---
+
+## 9) Infraestrutura (mínimo aceitável)
+
+### 9.1 VPS
+- VPS próximo ao servidor do broker.
+- Ping baixo e estável (ideal < 5–10ms).
+- CPU/RAM suficientes para não atrasar OnTick/OnTimer.
+
+### 9.2 MT5 terminal
+- Atualizações e reinícios: EA deve retomar estado sem “perder a mão”.
+- AutoTrading e permissões corretas.
+
+### 9.3 Conectividade
+- Detectar `TerminalInfoInteger(TERMINAL_CONNECTED)` e agir:
+  - pausar envio
+  - resync ao voltar
+
+---
+
+## 10) Coisas que DEVEM ser auditadas no código do EA (pontos de revisão para o Codex)
+
+### 10.1 Normalização de preços
+- existe função `RoundToTick(symbol, price)`?
+- SL/TP normalizados também?
+- tratamento de digits e tick_size correto por símbolo?
+
+### 10.2 Validação de SL/TP vs stop_level
+- antes de enviar, checa `stops_level`?
+- se inválido, ajusta ou aborta com log?
+
+### 10.3 Freeze level em cancel/modify
+- checa freeze antes de modificar/cancelar?
+- se freeze impede, agenda tentativa futura?
+
+### 10.4 Estado e idempotência
+- como o EA evita duplicar LIMIT?
+- existe mapa de “intenção” (expected orders) vs “real orders”?
+
+### 10.5 Reconciliação server-side
+- o EA confere ordens/posições do servidor periodicamente?
+- ao iniciar/reiniciar, reconstrói o estado a partir do servidor?
+
+### 10.6 Tratamento de retcodes
+- existe switch/case por retcode?
+- retries com backoff?
+- logs completos?
+
+### 10.7 Filling mode compatível
+- o EA seleciona filling mode aceito pelo símbolo/conta?
+- lida com partial fill se ocorrer?
+
+### 10.8 Timer / loops
+- evita flood de OrderSend?
+- garante serialização de trade operations?
+
+### 10.9 Persistência (opcional, mas recomendado)
+- salvar estado mínimo (ordens intencionadas) em arquivo/GlobalVariables para reinício.
+
+---
+
+## 11) “Execution Emulator” (especificação para implementar no EA)
+
+> Objetivo: simular atritos do live no Strategy Tester, sem mudar a estratégia.
+
+### 11.1 Regras
+- Só ativo quando `MQL_TESTER == true` e input `EnableExecutionEmu = true`.
+- Em live: sempre off.
+
+### 11.2 Componentes
+1) **FillMissProb** (10–35%):
+   - quando houver condição de touch, uma fração não executa (simula falta de liquidez/fila).
+2) **LatencyMs** (50–250ms):
+   - fila de ações: enviar/cancelar/modificar só após tempo agendado.
+3) **RejectProb** (1–5%):
+   - simula recusa/erro para testar robustez (EA deve reagir com retry/backoff).
+4) **PartialFillProb** (0–25%):
+   - opcional; reduzir volume executado conforme ratio mínimo.
+5) **ExitSlippagePoints**:
+   - aplicar somente em saídas “market”/fechamentos (se existirem).
+
+### 11.3 Requisitos de auditoria
+- logs devem indicar claramente:
+  - `EMU_TOUCH_MISS`
+  - `EMU_DELAY_APPLIED`
+  - `EMU_REJECT_SIM`
+  - `EMU_PARTIAL_FILL`
+
+---
+
+## 12) Critérios de Aceitação (quando considerar “pronto para live”)
+
+O EA pode ir para live com risco reduzido quando:
+
+1) Backtest C (Emu) permanece lucrativo e com drawdown aceitável.
+2) DEMO Hantec (2–4 semanas) bate próximo do Backtest C em:
+   - #trades (±10–20%)
+   - touch/fill ratio semelhante
+   - distribuição de PnL por trade semelhante
+3) Logs mostram:
+   - poucas divergências de estado
+   - retries controlados
+   - sem duplicidade de ordens
+4) Execução respeita:
+   - stops_level e freeze_level sem erros recorrentes
+   - normalização de tick correta
+
+---
+
+## 13) Itens “Não-Negociáveis” (se faltar, não ir live)
+
+- Real ticks no tester.
+- Normalização de preço por tick size.
+- Respeito a stop_level e freeze_level.
+- Tratamento robusto de retcodes + retry/backoff.
+- Idempotência (anti-duplicidade).
+- Reconciliação com servidor e recuperação pós-restart.
+- Log de touch vs fill e motivos de falha.
+- Forward test DEMO na própria Hantec.
+
+---
+
+## 14) Entregáveis que o Codex deve produzir ao revisar seu código
+
+1) Lista de pontos de risco (bugs, race conditions, duplicidade, normalização).
+2) Sugestões concretas com alterações mínimas (sem mudar estratégia).
+3) Implementação (ou esqueleto) do Execution Emulator conforme spec.
+4) Padronização de logs e métricas.
+5) Rotina de resync e recuperação após restart.
+6) Script/guia de como rodar Backtests A/B/C e comparar com DEMO.
+
+---
+
+## 15) Perguntas objetivas para preencher (facilita a revisão)
+
+- Qual o sufixo exato dos símbolos na Hantec? (ex.: XAUUSDm)
+- Tipo de conta: ECN/STP? Hedging ou Netting?
+- O EA coloca SL/TP no envio da pending ou depois?
+- O EA cancela/reposiciona LIMIT com frequência? (a cada tick? por timer?)
+- Volume típico (lotes) e frequência de ordens por minuto?
+- O EA fecha posições via SL/TP do servidor ou faz close “na mão”?
+
+> Preencher essas respostas melhora a precisão da auditoria.
+
+---
+
+### Fim do documento

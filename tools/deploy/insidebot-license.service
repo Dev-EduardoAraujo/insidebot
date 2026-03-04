@@ -1,0 +1,21 @@
+[Unit]
+Description=InsideBot License Server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/bot_MT5
+Environment="INSIDEBOT_LICENSE_ADMIN_KEY=CHANGE_ME_ADMIN_KEY"
+Environment="INSIDEBOT_LICENSE_DB=/opt/bot_MT5/tools/license_data/licenses.db"
+Environment="INSIDEBOT_LICENSE_HOST=127.0.0.1"
+Environment="INSIDEBOT_LICENSE_PORT=8090"
+Environment="INSIDEBOT_LICENSE_LOG_LEVEL=INFO"
+ExecStart=/usr/bin/python3 /opt/bot_MT5/tools/insidebot_license_server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+

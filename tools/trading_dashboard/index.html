@@ -1,0 +1,524 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inside Report Intelligence - Trading Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="logo">Inside <span class="subtitle">Report Intelligence</span></h1>
+            </div>
+            <div class="header-right">
+                <button class="btn-reload" id="btnReload">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                    </svg>
+                    Recarregar
+                </button>
+                <select class="select-report" id="selectReport">
+                    <option value="">Selecione um relatorio...</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Bot Parameters Dropdown -->
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    </svg>
+                    <strong>Parametros de entrada</strong>
+                </summary>
+                <div class="params-content" id="botParams">
+                    <p style="color: var(--text-muted); text-align: center; padding: 1rem;">Selecione um relatorio para ver os parametros</p>
+                </div>
+            </details>
+
+            <!-- Summary Cards -->
+            <div class="summary-grid">
+                <!-- Operacoes -->
+                <div class="card card-large">
+                    <div class="card-header">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                        </svg>
+                        <span class="card-label">OPERACOES</span>
+                    </div>
+                    <div class="card-value" id="totalOps">-</div>
+                    <div class="card-metrics">
+                        <div class="metric-section-title">
+                            <span>First_op</span>
+                            <span class="metric-section-pnl" id="firstOpsPnL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Qtd</span>
+                            <span class="metric-value" id="firstOpsCount">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">TP</span>
+                            <span class="metric-value" id="firstOpsTP">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">SL</span>
+                            <span class="metric-value" id="firstOpsSL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Winrate</span>
+                            <span class="metric-value" id="firstOpsWinrate">-</span>
+                        </div>
+
+                        <div class="metric-section-title">
+                            <span>TurnOf</span>
+                            <span class="metric-section-pnl" id="turnofOpsPnL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Qtd</span>
+                            <span class="metric-value" id="turnofOpsCount">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">TP</span>
+                            <span class="metric-value" id="turnofOpsTP">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">SL</span>
+                            <span class="metric-value" id="turnofOpsSL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Winrate</span>
+                            <span class="metric-value" id="turnofOpsWinrate">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance -->
+                <div class="card card-large">
+                    <div class="card-header">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                        </svg>
+                        <span class="card-label">PERFORMANCE</span>
+                    </div>
+                    <div class="card-value" id="netProfit">-</div>
+                    <div class="card-metrics">
+                        <div class="metric-row">
+                            <span class="metric-label">Win Rate</span>
+                            <span class="metric-value" id="winRate">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Profit Factor</span>
+                            <span class="metric-value" id="profitFactor">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Payoff Ratio</span>
+                            <span class="metric-value" id="payoffRatio">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Gross Profit</span>
+                            <span class="metric-value" id="grossProfit">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Gross Loss</span>
+                            <span class="metric-value" id="grossLoss">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Media/Trade</span>
+                            <span class="metric-value" id="avgProfit">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Mediana</span>
+                            <span class="metric-value" id="medianProfit">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Recovery Factor</span>
+                            <span class="metric-value" id="recoveryFactor">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drawdown -->
+                <div class="card card-large">
+                    <div class="card-header">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/>
+                        </svg>
+                        <span class="card-label">DRAWDOWN</span>
+                    </div>
+                    <div class="card-value" id="maxDD">-</div>
+                    <div class="card-metrics">
+                        <div class="metric-row">
+                            <span class="metric-label">Max DD %</span>
+                            <span class="metric-value" id="maxDDPct">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">DD Tick Flutuante</span>
+                            <span class="metric-value" id="maxDDTick">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">DD Tick Flutuante %</span>
+                            <span class="metric-value" id="maxDDTickPct">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">DD + LIMIT</span>
+                            <span class="metric-value" id="maxDDCombined">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Dia Pico Flutuante</span>
+                            <span class="metric-value" id="peakFloatingDate">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Hora do Pico</span>
+                            <span class="metric-value" id="peakFloatingTime">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Posicoes no Pico</span>
+                            <span class="metric-value" id="peakFloatingPositions">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Dias Monitorados</span>
+                            <span class="metric-value" id="daysMonitored">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Extremos -->
+                <div class="card card-large">
+                    <div class="card-header">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+                        </svg>
+                        <span class="card-label">EXTREMOS</span>
+                    </div>
+                    <div class="card-value" id="bestTrade">-</div>
+                    <div class="card-metrics">
+                        <div class="metric-row">
+                            <span class="metric-label">Pior Trade</span>
+                            <span class="metric-value" id="worstTrade">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">MFE Medio</span>
+                            <span class="metric-value" id="avgMFE">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">MAE Medio</span>
+                            <span class="metric-value" id="avgMAE">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">MFE Max</span>
+                            <span class="metric-value" id="maxMFE">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">MAE Min</span>
+                            <span class="metric-value" id="minMAE">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Dist. Media SL</span>
+                            <span class="metric-value" id="avgAdverseToSL">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AddOn -->
+                <div class="card card-large card-others">
+                    <div class="card-header">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 4v16m8-8H4"/>
+                        </svg>
+                        <span class="card-label">OTHERS</span>
+                    </div>
+                    <div class="card-value" id="opsWithAddon">-</div>
+                    <div class="card-metrics">
+                        <div class="metric-section-title">
+                            <span>ADON</span>
+                            <span class="metric-section-pnl" id="addonOpsPnL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Qtd</span>
+                            <span class="metric-value" id="addonOpsCount">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">TP</span>
+                            <span class="metric-value" id="addonOpsTP">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">SL</span>
+                            <span class="metric-value" id="addonOpsSL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Winrate</span>
+                            <span class="metric-value" id="addonOpsWinrate">-</span>
+                        </div>
+
+                        <div class="metric-section-title">
+                            <span>SLD</span>
+                            <span class="metric-section-pnl" id="slicedOpsPnL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Qtd</span>
+                            <span class="metric-value" id="slicedOpsCount">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">TP</span>
+                            <span class="metric-value" id="slicedOpsTP">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">SL</span>
+                            <span class="metric-value" id="slicedOpsSL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Winrate</span>
+                            <span class="metric-value" id="slicedOpsWinrate">-</span>
+                        </div>
+
+                        <div class="metric-section-title">
+                            <span>PCM</span>
+                            <span class="metric-section-pnl" id="pcmOpsPnL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Qtd</span>
+                            <span class="metric-value" id="pcmOpsCount">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">TP</span>
+                            <span class="metric-value" id="pcmOpsTP">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">SL</span>
+                            <span class="metric-value" id="pcmOpsSL">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Winrate</span>
+                            <span class="metric-value" id="pcmOpsWinrate">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sequencias -->
+                <div class="card card-large">
+                    <div class="card-header">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 6h16M4 12h16M4 18h16"/>
+                        </svg>
+                        <span class="card-label">SEQUENCIAS</span>
+                    </div>
+                    <div class="card-value" id="maxWinStreak">-</div>
+                    <div class="card-metrics">
+                        <div class="metric-row">
+                            <span class="metric-label">Valor Ganhos</span>
+                            <span class="metric-value" id="maxWinStreakValue">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Valor Perdas</span>
+                            <span class="metric-value" id="maxLossStreakValue">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Max Seq TP</span>
+                            <span class="metric-value" id="maxTPStreak">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Max Seq SL</span>
+                            <span class="metric-value" id="maxSLStreak">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monthly Chart -->
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h2 class="section-title" id="chartTitle">Resumo Temporal</h2>
+                    <div class="chart-controls">
+                        <select class="chart-time-select" id="chartGranularity">
+                            <option value="day">Dia</option>
+                            <option value="week">Semana</option>
+                            <option value="month" selected>Mes</option>
+                        </select>
+                        <button class="chart-reset-btn" id="chartResetBtn" type="button">Reset Zoom</button>
+                    </div>
+                </div>
+                <div class="chart-hint">Mouse: rolagem = zoom | Shift + rolagem = escala colunas | duplo clique = reset</div>
+                <canvas id="monthlyChart"></canvas>
+            </div>
+
+            <!-- Performance Metrics -->
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3 class="metric-title">Analises Gerais</h3>
+                    <div class="metric-table" id="generalAnalysis"></div>
+                </div>
+                <div class="metric-card">
+                    <h3 class="metric-title">Analise por Flags (ON/OFF)</h3>
+                    <div class="metric-table" id="flagsTable"></div>
+                </div>
+                <div class="metric-card">
+                    <h3 class="metric-title">Analise por Dia da Semana</h3>
+                    <div class="metric-table" id="weekdayTable"></div>
+                </div>
+                <div class="metric-card">
+                    <h3 class="metric-title">Analise por Hora de Entrada</h3>
+                    <div class="metric-table" id="entryHourTable"></div>
+                </div>
+            </div>
+
+            <!-- Top Trades -->
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                    </svg>
+                    <strong>Top 10 Melhores Trades</strong>
+                </summary>
+                <div class="params-content" id="topTradesDropdown"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/>
+                    </svg>
+                    <strong>Top 10 Piores Trades</strong>
+                </summary>
+                <div class="params-content" id="worstTradesDropdown"></div>
+            </details>
+
+            <!-- DD Tick Detail -->
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    <strong>DD Tick a Tick - Detalhamento Diario</strong>
+                </summary>
+                <div class="params-content" id="ddTickDropdown"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 3v18"/>
+                        <path d="M3 12h18"/>
+                        <path d="M7 7h10v10H7z"/>
+                    </svg>
+                    <strong>DD Open Diario (Saldo e Limites)</strong>
+                </summary>
+                <div class="params-content" id="ddOpenDropdown"></div>
+            </details>
+
+            <!-- Additional Sections as Dropdowns -->
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    <strong>Operacoes (Detalhado)</strong>
+                </summary>
+                <div class="params-content" id="detailedOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 4v16m8-8H4"/>
+                    </svg>
+                    <strong>Operacoes com ADON</strong>
+                </summary>
+                <div class="params-content" id="addonOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 4v16m8-8H4"/>
+                        <path d="M7 12h10"/>
+                    </svg>
+                    <strong>Operacoes ADON Puro (Somente Tickets Add)</strong>
+                </summary>
+                <div class="params-content" id="addonOnlyOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <strong>Operacoes TP</strong>
+                </summary>
+                <div class="params-content" id="tpOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                    <strong>Operacoes SL</strong>
+                </summary>
+                <div class="params-content" id="slOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+                    </svg>
+                    <strong>Operacoes TurnOf</strong>
+                </summary>
+                <div class="params-content" id="reversalOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M2 12h20"/>
+                        <path d="M7 7h10v10H7z"/>
+                    </svg>
+                    <strong>Operacoes PCM TP</strong>
+                </summary>
+                <div class="params-content" id="pcmTpOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M2 12h20"/>
+                        <path d="M7 7h10v10H7z"/>
+                    </svg>
+                    <strong>Operacoes PCM SL</strong>
+                </summary>
+                <div class="params-content" id="pcmSlOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M2 12h20"/>
+                        <path d="M7 7h10v10H7z"/>
+                    </svg>
+                    <strong>Operacoes PCM BE</strong>
+                </summary>
+                <div class="params-content" id="pcmBeOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                    </svg>
+                    <strong>Dias sem Operacao (NoTrade)</strong>
+                </summary>
+                <div class="params-content" id="noTradeDropdown"></div>
+            </details>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
