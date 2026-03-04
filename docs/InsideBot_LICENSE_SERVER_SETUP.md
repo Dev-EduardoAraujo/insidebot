@@ -17,6 +17,9 @@ Com base na resposta, ele:
 ## 2. Arquivos criados
 
 - `tools/insidebot_license_server.py` (API de licencas)
+- `tools/license_admin/index.html` (frontend admin)
+- `tools/license_admin/styles.css` (estilo frontend admin)
+- `tools/license_admin/app.js` (logica frontend admin)
 - `tools/iniciar_insidebot_license_server.ps1` (startup local)
 - `tools/gerenciar_insidebot_licencas.ps1` (admin: criar/listar/revogar/renovar)
 - `tools/aplicar_release_insidebot.ps1` (seta token/cliente no `InsideBot.mq5`)
@@ -67,6 +70,10 @@ Endpoints:
 - `POST /api/v1/admin/license/upsert`
 - `POST /api/v1/admin/license/revoke`
 - `POST /api/v1/admin/license/extend`
+
+Painel web:
+
+- `GET /admin` (UI para controlar licencas e visualizar eventos)
 
 ## 4. Execucao local (teste rapido)
 

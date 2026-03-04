@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InsideBot License Admin</title>
+  <link rel="stylesheet" href="/admin/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>InsideBot License Admin</h1>
+      <p class="muted">Control panel for license management and audit.</p>
+    </div>
+    <div class="status-wrap">
+      <span id="healthDot" class="dot dot-off"></span>
+      <span id="healthText">Disconnected</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="card">
+      <h2>Connection</h2>
+      <div class="grid-2">
+        <label>
+          API Base URL
+          <input id="baseUrl" type="text" />
+        </label>
+        <label>
+          Admin Key
+          <input id="adminKey" type="password" placeholder="X-Admin-Key" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="saveConnBtn" class="btn">Save</button>
+        <button id="testConnBtn" class="btn btn-primary">Test Connection</button>
+        <button id="refreshAllBtn" class="btn">Refresh All</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Overview</h2>
+      <div class="cards-grid">
+        <div class="mini-card">
+          <span class="k">Total Licenses</span>
+          <span id="statTotalLicenses" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Active</span>
+          <span id="statActive" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Revoked</span>
+          <span id="statRevoked" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Expiring (7d)</span>
+          <span id="statExpiring7d" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Events (loaded)</span>
+          <span id="statEvents" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Denied (loaded)</span>
+          <span id="statDenied" class="v">-</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Create / Update License</h2>
+      <div class="grid-3">
+        <label>
+          Token
+          <input id="fToken" type="text" placeholder="TOK_CLIENTE_001" />
+        </label>
+        <label>
+          Customer Name
+          <input id="fCustomer" type="text" placeholder="Cliente 1" />
+        </label>
+        <label>
+          Expires At (UTC)
+          <input id="fExpiresAt" type="text" placeholder="2026-12-31 23:59:59" />
+        </label>
+      </div>
+      <div class="grid-2">
+        <label>
+          Allowed Logins (comma separated)
+          <input id="fLogins" type="text" placeholder="12345678,23456789" />
+        </label>
+        <label>
+          Allowed Servers (comma separated)
+          <input id="fServers" type="text" placeholder="HantecMarkets-Server" />
+        </label>
+      </div>
+      <label>
+        Notes
+        <textarea id="fNotes" rows="2" placeholder="Optional notes"></textarea>
+      </label>
+      <div class="row">
+        <label class="chk"><input id="fActive" type="checkbox" checked> Active</label>
+        <label class="chk"><input id="fRevoked" type="checkbox"> Revoked</label>
+      </div>
+      <div class="row">
+        <button id="upsertBtn" class="btn btn-primary">Save License</button>
+        <button id="clearFormBtn" class="btn">Clear Form</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Licenses</h2>
+      <div class="row wrap">
+        <label>
+          Filter Token
+          <input id="licenseFilterToken" type="text" placeholder="part of token" />
+        </label>
+        <label>
+          Limit
+          <input id="licenseLimit" type="number" min="1" max="5000" value="200" />
+        </label>
+        <button id="refreshLicensesBtn" class="btn btn-primary">Load Licenses</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>Expires</th>
+              <th>Allowed Login(s)</th>
+              <th>Allowed Server(s)</th>
+              <th>Last Seen</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="licensesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Validation Events</h2>
+      <div class="row wrap">
+        <label>
+          Filter Token
+          <input id="eventsFilterToken" type="text" placeholder="part of token" />
+        </label>
+        <label>
+          Limit
+          <input id="eventsLimit" type="number" min="1" max="5000" value="200" />
+        </label>
+        <button id="refreshEventsBtn" class="btn btn-primary">Load Events</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time UTC</th>
+              <th>Token</th>
+              <th>Status</th>
+              <th>Message</th>
+              <th>Login</th>
+              <th>Server</th>
+              <th>Program</th>
+              <th>Build</th>
+              <th>IP</th>
+            </tr>
+          </thead>
+          <tbody id="eventsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Validate Simulation</h2>
+      <div class="grid-3">
+        <label>
+          Token
+          <input id="vToken" type="text" placeholder="TOK_CLIENTE_001" />
+        </label>
+        <label>
+          Login
+          <input id="vLogin" type="text" placeholder="12345678" />
+        </label>
+        <label>
+          Server
+          <input id="vServer" type="text" placeholder="HantecMarkets-Server" />
+        </label>
+      </div>
+      <div class="grid-3">
+        <label>
+          Company
+          <input id="vCompany" type="text" placeholder="Hantec" />
+        </label>
+        <label>
+          Name
+          <input id="vName" type="text" placeholder="Conta Cliente" />
+        </label>
+        <label>
+          Program / Build
+          <div class="inline">
+            <input id="vProgram" type="text" value="InsideBot" />
+            <input id="vBuild" type="text" value="4750" />
+          </div>
+        </label>
+      </div>
+      <div class="row">
+        <button id="validateBtn" class="btn btn-primary">Run Validate</button>
+      </div>
+      <pre id="validateOutput" class="json-box">{}</pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span id="toast"></span>
+  </footer>
+
+  <script src="/admin/app.js"></script>
+</body>
+</html>

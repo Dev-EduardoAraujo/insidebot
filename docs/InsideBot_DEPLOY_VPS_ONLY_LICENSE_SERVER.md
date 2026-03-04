@@ -71,6 +71,9 @@ sudo -u insidebot git remote add origin "$GH_REPO"
 sudo -u insidebot git sparse-checkout init --no-cone
 sudo -u insidebot git sparse-checkout set \
   tools/insidebot_license_server.py \
+  tools/license_admin/index.html \
+  tools/license_admin/styles.css \
+  tools/license_admin/app.js \
   tools/deploy/minimal/insidebot-license.service \
   tools/deploy/minimal/nginx-insidebotcontrol.conf
 sudo -u insidebot git fetch --depth=1 origin "$GH_BRANCH"
@@ -136,6 +139,16 @@ curl -sS https://insidebotcontrol.com.br/api/health
 ```
 
 Esperado: `{"ok": true, ...}`
+
+## 10.1) Abrir painel web
+
+No navegador:
+
+```text
+https://insidebotcontrol.com.br/admin
+```
+
+Use a `ADMIN_KEY` no campo "Admin Key" para listar/editar licencas.
 
 ## 11) Criar primeira licenca (API admin)
 

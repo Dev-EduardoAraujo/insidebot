@@ -9,6 +9,7 @@ POST /api/v1/license/validate
 import argparse
 import json
 import logging
+import mimetypes
 import os
 import sqlite3
 import threading
@@ -507,6 +508,67 @@ class LicenseHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_text(self, code: int, content: str, content_type: str = "text/plain; charset=utf-8"):
+        body = content.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_binary(self, code: int, data: bytes, content_type: str):
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _static_root_candidates():
+        script_dir = Path(__file__).resolve().parent
+        return [
+            script_dir / "tools" / "license_admin",  # runtime in /opt/insidebot-license
+            script_dir / "license_admin",            # local fallback
+        ]
+
+    def _find_static_root(self):
+        for candidate in self._static_root_candidates():
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+        return None
+
+    def _serve_static(self, path: str):
+        static_root = self._find_static_root()
+        if static_root is None:
+            self._send_text(404, "admin_frontend_not_found")
+            return
+
+        normalized = path.split("?", 1)[0]
+        if normalized in {"/admin", "/admin/"}:
+            target = static_root / "index.html"
+        elif normalized.startswith("/admin/"):
+            relative = normalized[len("/admin/"):].lstrip("/")
+            if not relative:
+                relative = "index.html"
+            target = (static_root / relative).resolve()
+            if static_root.resolve() not in target.parents and target != static_root.resolve():
+                self._send_json(403, {"ok": False, "error": "forbidden"})
+                return
+        else:
+            self._send_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        if not target.exists() or not target.is_file():
+            self._send_json(404, {"ok": False, "error": "not_found"})
+            return
+
+        content_type, _ = mimetypes.guess_type(str(target))
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        data = target.read_bytes()
+        self._send_binary(200, data, content_type)
+
     def _read_json(self):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
@@ -539,6 +601,15 @@ class LicenseHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
+
+        if path in {"/", "/admin", "/admin/"} or path.startswith("/admin/"):
+            if path == "/":
+                self.send_response(302)
+                self.send_header("Location", "/admin")
+                self.end_headers()
+                return
+            self._serve_static(path)
+            return
 
         if path in {"/api/health", "/api/v1/health"}:
             self._send_json(
@@ -665,4 +736,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
