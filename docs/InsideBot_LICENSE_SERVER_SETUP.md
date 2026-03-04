@@ -74,6 +74,24 @@ Endpoints:
 Painel web:
 
 - `GET /admin` (UI para controlar licencas e visualizar eventos)
+- `POST /api/v1/admin/auth/login` (login da UI)
+- `GET /api/v1/admin/auth/check`
+- `POST /api/v1/admin/auth/logout`
+- Painel inclui:
+  - licencas ativas com dropdown por token (operacoes = validacoes permitidas + tentativas negadas)
+  - painel de todas as tentativas de ativacao
+  - painel de tentativas suspeitas (multi-login/multi-server/denied)
+
+Credenciais padrao da UI:
+
+- usuario: `admin`
+- senha: `F82615225b`
+
+Variaveis para alterar credenciais:
+
+- `INSIDEBOT_ADMIN_USERNAME`
+- `INSIDEBOT_ADMIN_PASSWORD`
+- Restricao de IP do admin deve ser aplicada no Nginx em `/admin` e `/api/v1/admin/*`.
 
 ## 4. Execucao local (teste rapido)
 

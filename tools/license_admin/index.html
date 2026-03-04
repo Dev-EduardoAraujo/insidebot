@@ -7,6 +7,23 @@
   <link rel="stylesheet" href="/admin/styles.css">
 </head>
 <body>
+  <div id="loginOverlay" class="overlay">
+    <div class="overlay-card">
+      <h2>Admin Login</h2>
+      <p class="muted">InsideBot License Control</p>
+      <label>
+        Username
+        <input id="overlayUser" type="text" value="admin" />
+      </label>
+      <label>
+        Password
+        <input id="overlayPass" type="password" />
+      </label>
+      <button id="overlayLoginBtn" class="btn btn-primary">Login</button>
+      <p id="overlayError" class="error-text"></p>
+    </div>
+  </div>
+
   <header class="topbar">
     <div>
       <h1>InsideBot License Admin</h1>
@@ -27,12 +44,13 @@
           <input id="baseUrl" type="text" />
         </label>
         <label>
-          Admin Key
-          <input id="adminKey" type="password" placeholder="X-Admin-Key" />
+          Session
+          <input id="authState" type="text" value="Not authenticated" readonly />
         </label>
       </div>
       <div class="row">
         <button id="saveConnBtn" class="btn">Save</button>
+        <button id="logoutBtn" class="btn">Logout</button>
         <button id="testConnBtn" class="btn btn-primary">Test Connection</button>
         <button id="refreshAllBtn" class="btn">Refresh All</button>
       </div>
@@ -64,6 +82,10 @@
         <div class="mini-card">
           <span class="k">Denied (loaded)</span>
           <span id="statDenied" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Suspicious Token(s)</span>
+          <span id="statSuspicious" class="v">-</span>
         </div>
       </div>
     </section>
@@ -109,7 +131,28 @@
     </section>
 
     <section class="card">
-      <h2>Licenses</h2>
+      <h2>Active Licenses</h2>
+      <p class="muted">Only active (not revoked and not expired). Each row has a dropdown with operations/attempts.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>Customer</th>
+              <th>Expires</th>
+              <th>Allowed Login(s)</th>
+              <th>Allowed Server(s)</th>
+              <th>Last Seen</th>
+              <th>Operations</th>
+            </tr>
+          </thead>
+          <tbody id="activeLicensesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>All Licenses</h2>
       <div class="row wrap">
         <label>
           Filter Token
@@ -141,7 +184,8 @@
     </section>
 
     <section class="card">
-      <h2>Validation Events</h2>
+      <h2>All Activation Attempts</h2>
+      <p class="muted">Use this table to detect abuse (multiple accounts, blocked server/login, invalid tokens).</p>
       <div class="row wrap">
         <label>
           Filter Token
@@ -149,7 +193,15 @@
         </label>
         <label>
           Limit
-          <input id="eventsLimit" type="number" min="1" max="5000" value="200" />
+          <input id="eventsLimit" type="number" min="1" max="5000" value="1000" />
+        </label>
+        <label>
+          Status
+          <select id="eventsStatusFilter">
+            <option value="all">All</option>
+            <option value="allowed">Allowed only</option>
+            <option value="denied">Denied only</option>
+          </select>
         </label>
         <button id="refreshEventsBtn" class="btn btn-primary">Load Events</button>
       </div>
@@ -169,6 +221,25 @@
             </tr>
           </thead>
           <tbody id="eventsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Suspicious Activation Attempts</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>Distinct Login(s)</th>
+              <th>Distinct Server(s)</th>
+              <th>Denied Attempts</th>
+              <th>Last Attempt</th>
+              <th>Signal</th>
+            </tr>
+          </thead>
+          <tbody id="suspiciousBody"></tbody>
         </table>
       </div>
     </section>

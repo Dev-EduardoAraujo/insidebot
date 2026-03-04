@@ -11,6 +11,7 @@ import json
 import logging
 import mimetypes
 import os
+import secrets
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -301,8 +302,8 @@ class LicenseStore:
         params = []
         where = ""
         if token:
-            where = "WHERE token = ?"
-            params.append(token)
+            where = "WHERE token LIKE ?"
+            params.append(f"%{token}%")
         with self._connect() as conn:
             total = conn.execute(f"SELECT COUNT(*) AS c FROM licenses {where}", params).fetchone()["c"]
             rows = conn.execute(
@@ -318,8 +319,8 @@ class LicenseStore:
         params = []
         where = ""
         if token:
-            where = "WHERE token = ?"
-            params.append(token)
+            where = "WHERE token LIKE ?"
+            params.append(f"%{token}%")
 
         with self._connect() as conn:
             total = conn.execute(f"SELECT COUNT(*) AS c FROM validation_events {where}", params).fetchone()["c"]
@@ -485,10 +486,52 @@ class LicenseStore:
 
 
 class LicenseHTTPServer(ThreadingHTTPServer):
-    def __init__(self, server_address, handler_class, store: LicenseStore, admin_key: str):
+    def __init__(
+        self,
+        server_address,
+        handler_class,
+        store: LicenseStore,
+        admin_key: str,
+        admin_username: str,
+        admin_password: str,
+        session_ttl_seconds: int,
+    ):
         super().__init__(server_address, handler_class)
         self.store = store
         self.admin_key = admin_key
+        self.admin_username = admin_username
+        self.admin_password = admin_password
+        self.session_ttl_seconds = max(300, int(session_ttl_seconds))
+        self._sessions = {}
+        self._session_lock = threading.Lock()
+
+    def create_session(self, username: str):
+        token = secrets.token_urlsafe(32)
+        expires_at = utc_now() + timedelta(seconds=self.session_ttl_seconds)
+        with self._session_lock:
+            self._sessions[token] = {
+                "username": username,
+                "expires_at": expires_at,
+            }
+        return token, expires_at
+
+    def validate_session(self, token: str):
+        if not token:
+            return None
+        with self._session_lock:
+            entry = self._sessions.get(token)
+            if entry is None:
+                return None
+            if utc_now() > entry["expires_at"]:
+                del self._sessions[token]
+                return None
+            return entry["username"]
+
+    def revoke_session(self, token: str):
+        if not token:
+            return
+        with self._session_lock:
+            self._sessions.pop(token, None)
 
 
 class LicenseHandler(BaseHTTPRequestHandler):
@@ -503,7 +546,7 @@ class LicenseHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
@@ -579,13 +622,29 @@ class LicenseHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             raise ValueError("invalid_json")
 
+    def _get_bearer_token(self):
+        auth = self.headers.get("Authorization", "").strip()
+        if not auth.lower().startswith("bearer "):
+            return ""
+        return auth[7:].strip()
+
+    def _has_admin_access(self):
+        admin_key = getattr(self.server, "admin_key", "")
+        sent_key = self.headers.get("X-Admin-Key", "").strip()
+        if admin_key and sent_key and sent_key == admin_key:
+            return True
+
+        bearer = self._get_bearer_token()
+        if bearer and self.server.validate_session(bearer):
+            return True
+        return False
+
     def _require_admin(self):
         admin_key = getattr(self.server, "admin_key", "")
         if not admin_key:
             self._send_json(500, {"ok": False, "error": "admin_key_not_configured"})
             return False
-        sent_key = self.headers.get("X-Admin-Key", "")
-        if sent_key != admin_key:
+        if not self._has_admin_access():
             self._send_json(401, {"ok": False, "error": "unauthorized"})
             return False
         return True
@@ -593,7 +652,7 @@ class LicenseHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
 
@@ -642,11 +701,52 @@ class LicenseHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, **result})
             return
 
+        if path == "/api/v1/admin/auth/check":
+            if not self._require_admin():
+                return
+            self._send_json(200, {"ok": True, "authenticated": True})
+            return
+
         self._send_json(404, {"ok": False, "error": "not_found"})
 
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if path == "/api/v1/admin/auth/login":
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "invalid_json"})
+                return
+            username = str(payload.get("username", "")).strip()
+            password = str(payload.get("password", "")).strip()
+            expected_user = getattr(self.server, "admin_username", "admin")
+            expected_pass = getattr(self.server, "admin_password", "")
+            if not expected_pass:
+                self._send_json(500, {"ok": False, "error": "admin_password_not_configured"})
+                return
+            if username != expected_user or password != expected_pass:
+                self._send_json(401, {"ok": False, "error": "invalid_credentials"})
+                return
+            token, expires_at = self.server.create_session(username)
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "token": token,
+                    "username": username,
+                    "expires_at": to_iso_utc(expires_at),
+                },
+            )
+            return
+
+        if path == "/api/v1/admin/auth/logout":
+            token = self._get_bearer_token()
+            if token:
+                self.server.revoke_session(token)
+            self._send_json(200, {"ok": True})
+            return
 
         if path == "/api/v1/license/validate":
             try:
@@ -709,6 +809,13 @@ def main():
         default=os.getenv("INSIDEBOT_LICENSE_DB", str(Path("tools") / "license_data" / "licenses.db")),
     )
     parser.add_argument("--admin-key", default=os.getenv("INSIDEBOT_LICENSE_ADMIN_KEY", ""))
+    parser.add_argument("--admin-username", default=os.getenv("INSIDEBOT_ADMIN_USERNAME", "admin"))
+    parser.add_argument("--admin-password", default=os.getenv("INSIDEBOT_ADMIN_PASSWORD", "F82615225b"))
+    parser.add_argument(
+        "--session-ttl-seconds",
+        type=int,
+        default=int(os.getenv("INSIDEBOT_ADMIN_SESSION_TTL_SECONDS", "43200")),
+    )
     parser.add_argument("--log-level", default=os.getenv("INSIDEBOT_LICENSE_LOG_LEVEL", "INFO"))
     args = parser.parse_args()
 
@@ -719,10 +826,20 @@ def main():
 
     db_path = Path(args.db_path)
     store = LicenseStore(db_path)
-    server = LicenseHTTPServer((args.host, args.port), LicenseHandler, store, admin_key=args.admin_key)
+    server = LicenseHTTPServer(
+        (args.host, args.port),
+        LicenseHandler,
+        store,
+        admin_key=args.admin_key,
+        admin_username=args.admin_username,
+        admin_password=args.admin_password,
+        session_ttl_seconds=args.session_ttl_seconds,
+    )
 
     if not args.admin_key:
         logging.warning("INSIDEBOT_LICENSE_ADMIN_KEY not set. Admin endpoints will return unauthorized.")
+    if args.admin_username == "admin" and args.admin_password == "F82615225b":
+        logging.warning("Using default admin login credentials. Change INSIDEBOT_ADMIN_PASSWORD in production.")
 
     logging.info("InsideBot license server listening on %s:%s", args.host, args.port)
     logging.info("DB: %s", db_path.resolve())

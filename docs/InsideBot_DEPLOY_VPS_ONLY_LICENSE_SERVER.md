@@ -13,6 +13,7 @@ $GH_REPO = "git@github.com:SEU_USUARIO/SEU_REPO.git"
 $GH_BRANCH = "main"
 $CERTBOT_EMAIL = "seu-email@dominio.com"
 $ADMIN_KEY = "TROQUE_POR_UMA_CHAVE_FORTE_32+"
+$ADMIN_ALLOWED_IP = "206.42.35.148"
 ```
 
 ## 2) Enviar codigo para GitHub (local -> remoto)
@@ -20,7 +21,7 @@ $ADMIN_KEY = "TROQUE_POR_UMA_CHAVE_FORTE_32+"
 No seu projeto local, garanta que os arquivos do servidor estao commitados:
 
 ```powershell
-git add tools/insidebot_license_server.py tools/deploy/minimal docs/InsideBot_DEPLOY_VPS_ONLY_LICENSE_SERVER.md
+git add tools/insidebot_license_server.py tools/license_admin tools/deploy/minimal docs/InsideBot_DEPLOY_VPS_ONLY_LICENSE_SERVER.md
 git commit -m "insidebot: deploy minimal license server on VPS"
 git push origin main
 ```
@@ -40,6 +41,7 @@ GH_REPO="git@github.com:SEU_USUARIO/SEU_REPO.git"
 GH_BRANCH="main"
 CERTBOT_EMAIL="seu-email@dominio.com"
 ADMIN_KEY="TROQUE_POR_UMA_CHAVE_FORTE_32+"
+ADMIN_ALLOWED_IP="206.42.35.148"
 ```
 
 ## 4) Preparar servidor
@@ -99,6 +101,8 @@ Criar env do servico:
 ```bash
 sudo bash -lc 'cat > /etc/insidebot-license.env <<EOF
 INSIDEBOT_LICENSE_ADMIN_KEY=$ADMIN_KEY
+INSIDEBOT_ADMIN_USERNAME=admin
+INSIDEBOT_ADMIN_PASSWORD=F82615225b
 INSIDEBOT_LICENSE_DB=/opt/insidebot-license/license_data/licenses.db
 INSIDEBOT_LICENSE_HOST=127.0.0.1
 INSIDEBOT_LICENSE_PORT=8090
@@ -120,6 +124,7 @@ sudo systemctl status insidebot-license.service --no-pager
 
 ```bash
 sudo cp /opt/insidebot-license/tools/deploy/minimal/nginx-insidebotcontrol.conf /etc/nginx/sites-available/insidebotcontrol.conf
+sudo sed -i "s/206.42.35.148/${ADMIN_ALLOWED_IP}/g" /etc/nginx/sites-available/insidebotcontrol.conf
 sudo ln -sf /etc/nginx/sites-available/insidebotcontrol.conf /etc/nginx/sites-enabled/insidebotcontrol.conf
 sudo nginx -t
 sudo systemctl reload nginx
@@ -148,7 +153,15 @@ No navegador:
 https://insidebotcontrol.com.br/admin
 ```
 
-Use a `ADMIN_KEY` no campo "Admin Key" para listar/editar licencas.
+Credenciais de login padrao da tela:
+
+- usuario: `admin`
+- senha: `F82615225b`
+
+Controle de acesso:
+
+- `/admin` e `/api/v1/admin/*` liberados apenas para `ADMIN_ALLOWED_IP`.
+- `/api/v1/license/validate` permanece publico para os EAs dos clientes.
 
 ## 11) Criar primeira licenca (API admin)
 
