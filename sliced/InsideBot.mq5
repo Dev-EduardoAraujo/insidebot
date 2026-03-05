@@ -265,6 +265,7 @@ datetime g_licenseExpiresAt = 0;
 string g_licenseStatus = "NOT_CHECKED";
 string g_licenseMessage = "";
 string g_licenseCustomerName = "";
+string g_lastUserBlockMessage = "";
 
 // Controle da virada pre-armada por STOP (hedging)
 ulong g_preArmedReversalOrderTicket = 0;
@@ -829,12 +830,18 @@ string ResolveLicenseDeniedDisplayMessage()
       normalized == "server_not_allowed")
       return "Não foi dessa vez :)";
 
+   if(g_licenseStatus == "ACCOUNT_DENIED" || normalized == "account_not_allowed")
+      return "Conta não autorizada";
+
    return "Licenca invalida";
 }
 
 void ShowLicenseDeniedDisplayMessage()
 {
-   Comment(ResolveLicenseDeniedDisplayMessage());
+   string msg = ResolveLicenseDeniedDisplayMessage();
+   g_lastUserBlockMessage = msg;
+   Comment(msg);
+   Print(msg);
 }
 
 void ResetPendingLimitTelemetry()
@@ -3049,23 +3056,37 @@ int OnInit()
       if(!EnableLicenseValidation)
       {
          ReleaseError("LIC_RELEASE", "EnableLicenseValidation deve ficar true.");
+         g_licenseStatus = "DISABLED_RELEASE";
+         g_licenseMessage = "license_validation_mandatory";
+         ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
       }
 
       if(LicenseServerBaseUrl == "")
       {
          ReleaseError("LIC_URL", "LicenseServerBaseUrl vazio.");
+         g_licenseStatus = "URL_EMPTY";
+         g_licenseMessage = "license_url_empty";
+         ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
       }
 
       if(LicenseToken == "")
       {
          ReleaseError("LIC_TOKEN", "LicenseToken vazio.");
+         g_licenseStatus = "TOKEN_EMPTY";
+         g_licenseMessage = "license_token_empty";
+         ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
       }
 
       if(!EnforceAccountSecurity())
+      {
+         g_licenseStatus = "ACCOUNT_DENIED";
+         g_licenseMessage = "account_not_allowed";
+         ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
+      }
 
       if(!ValidateLicenseAndApplyPolicy(true))
       {
@@ -3305,7 +3326,8 @@ void OnDeinit(const int reason)
    }
    g_pcmMainChartSwitchUnavailable = false;
    g_pcmMirrorChartOpenUnavailable = false;
-   Comment("");
+   if(!(reason == REASON_INITFAILED && g_lastUserBlockMessage != ""))
+      Comment("");
 
    // Salvar logs
    if(EnableLogging)
@@ -3332,6 +3354,17 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   if(!g_isTesterMode && g_securityBlockTrading)
+   {
+      ShowLicenseDeniedDisplayMessage();
+      if(!g_securityBlockLogged)
+      {
+         ReleaseError("LIC_RUNTIME_BLOCK", "Execucao bloqueada.");
+         g_securityBlockLogged = true;
+      }
+      return;
+   }
+
    RefreshWatermark();
 
    if(!g_isTesterMode)
@@ -11730,4 +11763,3 @@ void LogNoTrade(string reason,
 
    g_noTradesLog += noTradeJson;
 }
-
