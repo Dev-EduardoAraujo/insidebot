@@ -170,7 +170,34 @@ class LicenseStore:
                 """
             )
             conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS trade_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token TEXT NOT NULL,
+                    event_time TEXT NOT NULL,
+                    login TEXT,
+                    server TEXT,
+                    company TEXT,
+                    account_name TEXT,
+                    program TEXT,
+                    build TEXT,
+                    operation_code TEXT,
+                    operation_chain_code TEXT,
+                    result TEXT,
+                    direction TEXT,
+                    entry_time TEXT,
+                    exit_time TEXT,
+                    profit_net REAL NOT NULL DEFAULT 0,
+                    payload_json TEXT NOT NULL,
+                    remote_ip TEXT
+                )
+                """
+            )
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_validation_events_token_time ON validation_events(token, event_time DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trade_events_token_time ON trade_events(token, event_time DESC)"
             )
             self._ensure_column(conn, "licenses", "last_remote_ip TEXT")
             self._ensure_column(conn, "licenses", "bound_at TEXT")
@@ -404,6 +431,55 @@ class LicenseStore:
             )
         return {"total": int(total), "items": items}
 
+    def list_trade_events(self, limit=200, offset=0, token=None):
+        limit = max(1, min(int(limit), 2000))
+        offset = max(0, int(offset))
+        params = []
+        where = ""
+        if token:
+            where = "WHERE token LIKE ?"
+            params.append(f"%{token}%")
+
+        with self._connect() as conn:
+            total = conn.execute(f"SELECT COUNT(*) AS c FROM trade_events {where}", params).fetchone()["c"]
+            rows = conn.execute(
+                f"""
+                SELECT id, token, event_time, login, server, company, account_name, program, build,
+                       operation_code, operation_chain_code, result, direction,
+                       entry_time, exit_time, profit_net, remote_ip
+                FROM trade_events
+                {where}
+                ORDER BY id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, limit, offset),
+            ).fetchall()
+
+        items = []
+        for row in rows:
+            items.append(
+                {
+                    "id": row["id"],
+                    "token": row["token"],
+                    "event_time": row["event_time"],
+                    "login": row["login"],
+                    "server": row["server"],
+                    "company": row["company"],
+                    "account_name": row["account_name"],
+                    "program": row["program"],
+                    "build": row["build"],
+                    "operation_code": row["operation_code"],
+                    "operation_chain_code": row["operation_chain_code"],
+                    "result": row["result"],
+                    "direction": row["direction"],
+                    "entry_time": row["entry_time"],
+                    "exit_time": row["exit_time"],
+                    "profit_net": float(row["profit_net"] or 0.0),
+                    "remote_ip": row["remote_ip"],
+                }
+            )
+        return {"total": int(total), "items": items}
+
     def _record_event(self, payload: dict, response: dict, remote_ip: str):
         login = str(payload.get("login", "")).strip()
         server = str(payload.get("server", "")).strip()
@@ -439,6 +515,85 @@ class LicenseStore:
                 ),
             )
             conn.commit()
+
+    def record_trade_event(self, payload: dict, remote_ip: str):
+        token = str(payload.get("token", "")).strip()
+        if not token:
+            raise ValueError("token_missing")
+
+        # Require existing token for telemetry ingestion.
+        license_row = self.get_license(token)
+        if license_row is None:
+            raise ValueError("token_not_found")
+
+        login = str(payload.get("login", "")).strip()
+        server = str(payload.get("server", "")).strip()
+        company = str(payload.get("company", "")).strip()
+        account_name = str(payload.get("name", "")).strip()
+        program = str(payload.get("program", "")).strip()
+        build = str(payload.get("build", "")).strip()
+        trade = payload.get("trade", {}) if isinstance(payload.get("trade"), dict) else {}
+
+        operation_code = str(trade.get("operation_code", "")).strip()
+        operation_chain_code = str(trade.get("operation_chain_code", "")).strip()
+        result = str(trade.get("result", "")).strip()
+        direction = str(trade.get("direction", "")).strip()
+        entry_time = str(trade.get("entry_time", "")).strip()
+        exit_time = str(trade.get("exit_time", "")).strip()
+        try:
+            profit_net = float(trade.get("profit_net", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            profit_net = 0.0
+
+        with self._write_lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO trade_events(
+                    token, event_time, login, server, company, account_name, program, build,
+                    operation_code, operation_chain_code, result, direction, entry_time, exit_time,
+                    profit_net, payload_json, remote_ip
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    token,
+                    to_iso_utc(utc_now()),
+                    login,
+                    server,
+                    company,
+                    account_name,
+                    program,
+                    build,
+                    operation_code,
+                    operation_chain_code,
+                    result,
+                    direction,
+                    entry_time,
+                    exit_time,
+                    profit_net,
+                    json.dumps(payload, ensure_ascii=True),
+                    remote_ip,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE licenses
+                SET last_seen_at = ?, last_login = ?, last_server = ?, last_program = ?, last_build = ?, last_remote_ip = ?, updated_at = ?
+                WHERE token = ?
+                """,
+                (
+                    to_iso_utc(utc_now()),
+                    login,
+                    server,
+                    program,
+                    build,
+                    remote_ip,
+                    to_iso_utc(utc_now()),
+                    token,
+                ),
+            )
+            conn.commit()
+
+        return {"ok": True, "token": token}
 
     def validate(self, payload: dict, remote_ip: str, lock_first_activation: bool = True):
         token = str(payload.get("token", "")).strip()
@@ -840,6 +995,16 @@ class LicenseHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, **result})
             return
 
+        if path == "/api/v1/admin/trades":
+            if not self._require_admin():
+                return
+            limit = int(query.get("limit", ["200"])[0])
+            offset = int(query.get("offset", ["0"])[0])
+            token = query.get("token", [""])[0].strip() or None
+            result = self.server.store.list_trade_events(limit=limit, offset=offset, token=token)
+            self._send_json(200, {"ok": True, **result})
+            return
+
         if path == "/api/v1/admin/auth/check":
             if not self._require_admin():
                 return
@@ -909,6 +1074,21 @@ class LicenseHandler(BaseHTTPRequestHandler):
                 remote_ip,
                 lock_first_activation=getattr(self.server, "lock_first_activation", True),
             )
+            self._send_json(200, result)
+            return
+
+        if path == "/api/v1/ops/ingest":
+            try:
+                payload = self._read_json()
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "invalid_json"})
+                return
+            remote_ip = self._get_remote_ip()
+            try:
+                result = self.server.store.record_trade_event(payload, remote_ip)
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+                return
             self._send_json(200, result)
             return
 

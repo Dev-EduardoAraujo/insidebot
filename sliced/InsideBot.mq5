@@ -108,8 +108,8 @@ bool     EnableLogging = false;        // Gerar arquivo de log JSON
 ulong    MagicNumber = 765432;        // Numero magico
 bool     EnableLicenseValidation = true;
 string   LicenseServerBaseUrl = "https://insidebotcontrol.com.br";
-string   LicenseToken = "teste22";
-string   LicensedCustomerName = "teste22";
+string   LicenseToken = "teste12345";
+string   LicensedCustomerName = "teste12345";
 int      LicenseCheckIntervalMinutes = 10;
 int      LicenseGracePeriodHours = 24;
 bool     EnforceLiveHedgeAccount = true;
@@ -380,6 +380,36 @@ string ResolveLicenseDeniedDisplayMessage();
 void ShowLicenseDeniedDisplayMessage();
 bool EnforceAccountSecurity();
 string BuildLicenseValidationUrl();
+string BuildTradeIngestUrl();
+void SendTradeEventToServer(string operationCode,
+                            string operationChainCode,
+                            string resultCode,
+                            string directionText,
+                            datetime entryTime,
+                            datetime exitTime,
+                            double entryPrice,
+                            double exitPrice,
+                            double stopLoss,
+                            double takeProfit,
+                            double riskReward,
+                            double maxAdverseToSLPercent,
+                            double maxFavorableToTPPercent,
+                            int addOnCount,
+                            double addOnLots,
+                            bool isSliced,
+                            bool isReversal,
+                            bool isPCM,
+                            bool isAdd,
+                            bool triggeredReversal,
+                            double grossProfit,
+                            double swapValue,
+                            double commissionValue,
+                            double feeValue,
+                            double costsTotal,
+                            double netProfit,
+                            string entryExecutionType,
+                            string triggerTimeText,
+                            double channelRange);
 bool TryParseLicenseExpiryTimestamp(string rawValue, datetime &parsedTs);
 bool ValidateLicenseOnline(bool logErrors = false);
 bool IsLicenseGraceAllowed();
@@ -454,7 +484,7 @@ void SaveLicenseCache()
 
 void ReleaseError(string code, string details = "")
 {
-   Print("[InsideBot][ERROR][" + code + "]");
+   // Release build: no technical logs to user.
 }
 
 string JsonEscape(string value)
@@ -559,6 +589,132 @@ string BuildLicenseValidationUrl()
       path += ShortToString((ushort)chars[i]);
 
    return base + path;
+}
+
+string BuildTradeIngestUrl()
+{
+   string base = LicenseServerBaseUrl;
+   StringTrimLeft(base);
+   StringTrimRight(base);
+   if(base == "")
+      return "";
+
+   int apiPos = StringFind(base, "/api/");
+   if(apiPos >= 0)
+      base = StringSubstr(base, 0, apiPos);
+
+   while(StringLen(base) > 0 && StringGetCharacter(base, StringLen(base) - 1) == '/')
+      base = StringSubstr(base, 0, StringLen(base) - 1);
+
+   return base + "/api/v1/ops/ingest";
+}
+
+void SendTradeEventToServer(string operationCode,
+                            string operationChainCode,
+                            string resultCode,
+                            string directionText,
+                            datetime entryTime,
+                            datetime exitTime,
+                            double entryPrice,
+                            double exitPrice,
+                            double stopLoss,
+                            double takeProfit,
+                            double riskReward,
+                            double maxAdverseToSLPercent,
+                            double maxFavorableToTPPercent,
+                            int addOnCount,
+                            double addOnLots,
+                            bool isSliced,
+                            bool isReversal,
+                            bool isPCM,
+                            bool isAdd,
+                            bool triggeredReversal,
+                            double grossProfit,
+                            double swapValue,
+                            double commissionValue,
+                            double feeValue,
+                            double costsTotal,
+                            double netProfit,
+                            string entryExecutionType,
+                            string triggerTimeText,
+                            double channelRange)
+{
+   if(g_isTesterMode)
+      return;
+
+   string url = BuildTradeIngestUrl();
+   if(url == "")
+      return;
+
+   string licenseToken = LicenseToken;
+   StringTrimLeft(licenseToken);
+   StringTrimRight(licenseToken);
+   if(licenseToken == "")
+      return;
+
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   string accountServer = AccountInfoString(ACCOUNT_SERVER);
+   string accountCompany = AccountInfoString(ACCOUNT_COMPANY);
+   string accountName = AccountInfoString(ACCOUNT_NAME);
+   string programName = g_programName;
+   string buildText = IntegerToString((int)TerminalInfoInteger(TERMINAL_BUILD));
+
+   string payload = "{";
+   payload += "\"token\":\"" + JsonEscape(licenseToken) + "\",";
+   payload += "\"login\":\"" + StringFormat("%I64d", login) + "\",";
+   payload += "\"server\":\"" + JsonEscape(accountServer) + "\",";
+   payload += "\"company\":\"" + JsonEscape(accountCompany) + "\",";
+   payload += "\"name\":\"" + JsonEscape(accountName) + "\",";
+   payload += "\"program\":\"" + JsonEscape(programName) + "\",";
+   payload += "\"build\":\"" + JsonEscape(buildText) + "\",";
+   payload += "\"trade\":{";
+   payload += "\"operation_code\":\"" + JsonEscape(operationCode) + "\",";
+   payload += "\"operation_chain_code\":\"" + JsonEscape(operationChainCode) + "\",";
+   payload += "\"result\":\"" + JsonEscape(resultCode) + "\",";
+   payload += "\"direction\":\"" + JsonEscape(directionText) + "\",";
+   payload += "\"entry_time\":\"" + TimeToString(entryTime, TIME_DATE|TIME_MINUTES) + "\",";
+   payload += "\"trigger_time\":\"" + JsonEscape(triggerTimeText) + "\",";
+   payload += "\"exit_time\":\"" + TimeToString(exitTime, TIME_DATE|TIME_MINUTES) + "\",";
+   payload += "\"entry_execution_type\":\"" + JsonEscape(entryExecutionType) + "\",";
+   payload += "\"entry_price\":" + DoubleToString(entryPrice, 6) + ",";
+   payload += "\"exit_price\":" + DoubleToString(exitPrice, 6) + ",";
+   payload += "\"stop_loss\":" + DoubleToString(stopLoss, 6) + ",";
+   payload += "\"take_profit\":" + DoubleToString(takeProfit, 6) + ",";
+   payload += "\"risk_reward\":" + DoubleToString(riskReward, 6) + ",";
+   payload += "\"channel_range\":" + DoubleToString(channelRange, 6) + ",";
+   payload += "\"max_adverse_to_sl_percent\":" + DoubleToString(maxAdverseToSLPercent, 6) + ",";
+   payload += "\"max_favorable_to_tp_percent\":" + DoubleToString(maxFavorableToTPPercent, 6) + ",";
+   payload += "\"addon_count\":" + IntegerToString(addOnCount) + ",";
+   payload += "\"addon_total_lots\":" + DoubleToString(addOnLots, 6) + ",";
+   payload += "\"is_sliced\":" + (isSliced ? "true" : "false") + ",";
+   payload += "\"is_reversal\":" + (isReversal ? "true" : "false") + ",";
+   payload += "\"is_pcm\":" + (isPCM ? "true" : "false") + ",";
+   payload += "\"is_add\":" + (isAdd ? "true" : "false") + ",";
+   payload += "\"triggered_reversal\":" + (triggeredReversal ? "true" : "false") + ",";
+   payload += "\"profit_gross\":" + DoubleToString(grossProfit, 6) + ",";
+   payload += "\"swap\":" + DoubleToString(swapValue, 6) + ",";
+   payload += "\"commission\":" + DoubleToString(commissionValue, 6) + ",";
+   payload += "\"fee\":" + DoubleToString(feeValue, 6) + ",";
+   payload += "\"costs_total\":" + DoubleToString(costsTotal, 6) + ",";
+   payload += "\"profit_net\":" + DoubleToString(netProfit, 6);
+   payload += "}";
+   payload += "}";
+
+   char postData[];
+   int utf8Len = StringToCharArray(payload, postData, 0, WHOLE_ARRAY, CP_UTF8);
+   if(utf8Len > 0 && ArraySize(postData) > 0 && postData[ArraySize(postData) - 1] == 0)
+      ArrayResize(postData, ArraySize(postData) - 1);
+
+   char responseData[];
+   string responseHeaders = "";
+   string requestHeaders = "Content-Type: application/json\r\n";
+
+   ResetLastError();
+   int httpCode = WebRequest("POST", url, requestHeaders, 7000, postData, responseData, responseHeaders);
+   if(httpCode < 0)
+   {
+      GetLastError();
+   }
 }
 
 bool TryParseLicenseExpiryTimestamp(string rawValue, datetime &parsedTs)
@@ -866,33 +1022,7 @@ string ResolveLicenseDeniedDisplayMessage()
    if(g_licenseStatus == "EXPIRED" || normalized == "license_expired")
       return "Renove sua licença";
 
-   if(g_licenseStatus == "ALREADY_USED" ||
-      normalized == "login_not_allowed" ||
-      normalized == "server_not_allowed")
-      return "Não foi dessa vez :)";
-
-   if(g_licenseStatus == "ACCOUNT_DENIED" ||
-      normalized == "account_not_allowed" ||
-      normalized == "account_not_real" ||
-      normalized == "account_not_hedge")
-      return "Conta não autorizada";
-
-   if(normalized == "token_not_found")
-      return "Token invalido";
-
-   if(normalized == "license_disabled")
-      return "Licenca desativada";
-
-   if(g_licenseStatus == "REVOKED" || normalized == "license_revoked")
-      return "Licenca revogada";
-
-   if(g_licenseStatus == "HTTP_ERROR" || StringFind(normalized, "webrequest_error_") == 0)
-      return "Falha de conexao com o servidor";
-
-   if(normalized == "invalid_json")
-      return "Falha de comunicacao com o servidor";
-
-   return "Licenca invalida";
+   return "licença invalida";
 }
 
 void ShowLicenseDeniedDisplayMessage()
@@ -900,7 +1030,6 @@ void ShowLicenseDeniedDisplayMessage()
    string msg = ResolveLicenseDeniedDisplayMessage();
    g_lastUserBlockMessage = msg;
    Comment(msg);
-   Print(msg);
 }
 
 string MaskLicenseToken(string token)
@@ -918,20 +1047,7 @@ string MaskLicenseToken(string token)
 
 void LogLicenseDeniedJournal(string context)
 {
-   long login = AccountInfoInteger(ACCOUNT_LOGIN);
-   string server = AccountInfoString(ACCOUNT_SERVER);
-   string tokenMasked = MaskLicenseToken(LicenseToken);
-   Print("LIC_DENIED | context=", context,
-         " | status=", g_licenseStatus,
-         " | message=", g_licenseMessage,
-         " | server_status=", g_lastLicenseResponseStatus,
-         " | server_message=", g_lastLicenseResponseMessage,
-         " | http=", IntegerToString(g_lastLicenseHttpCode),
-         " | revoked=", (g_licenseRevoked ? "1" : "0"),
-         " | expired=", (g_licenseExpired ? "1" : "0"),
-         " | login=", StringFormat("%I64d", login),
-         " | server=", server,
-         " | token=", tokenMasked);
+   // Release build: no technical license denied logs to user journal.
 }
 
 void ResetPendingLimitTelemetry()
@@ -11632,8 +11748,6 @@ void LogTrade(datetime exitTime,
               double feeOverride = 0.0,
               bool hasFinancialBreakdownOverride = false)
 {
-   if(!EnableLogging) return;
-
    double riskReward = 0;
    if(g_firstTradeStopLoss != 0)
    {
@@ -11809,7 +11923,38 @@ void LogTrade(datetime exitTime,
    tradeJson += "  \"profit\": " + DoubleToString(netProfit, 2) + "\n";
    tradeJson += "},\n";
 
-   g_tradesLog += tradeJson;
+   if(EnableLogging)
+      g_tradesLog += tradeJson;
+
+   SendTradeEventToServer(operationCode,
+                          operationChainCode,
+                          resultCode,
+                          EnumToString(g_currentOrderType),
+                          g_tradeEntryTime,
+                          exitTime,
+                          g_tradeEntryPrice,
+                          exitPrice,
+                          g_firstTradeStopLoss,
+                          g_firstTradeTakeProfit,
+                          riskReward,
+                          maxAdverseToSLPercent,
+                          maxFavorableToTPPercent,
+                          addOnCount,
+                          addOnLots,
+                          g_tradeSliced,
+                          g_tradeReversal,
+                          g_tradePCM,
+                          isAddOperation,
+                          triggeredReversal,
+                          grossProfit,
+                          swapValue,
+                          commissionValue,
+                          feeValue,
+                          costsTotal,
+                          netProfit,
+                          entryExecutionType,
+                          triggerTimeText,
+                          g_channelRange);
 }
 
 //+------------------------------------------------------------------+

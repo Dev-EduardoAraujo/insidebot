@@ -17,6 +17,7 @@ Com base na resposta, ele:
 - libera execucao (`allowed=true`)
 - bloqueia por revogacao/expiracao
 - aplica janela de graca offline (se configurada no EA)
+- pode travar no primeiro acesso valido (`login+server`) para anti-compartilhamento
 
 ## 2. Arquivos criados
 
@@ -74,6 +75,7 @@ Endpoints:
 - `POST /api/v1/admin/license/upsert`
 - `POST /api/v1/admin/license/revoke`
 - `POST /api/v1/admin/license/extend`
+- `POST /api/v1/admin/license/delete`
 
 Painel web:
 
@@ -85,6 +87,7 @@ Painel web:
   - licencas ativas com dropdown por token (operacoes = validacoes permitidas + tentativas negadas)
   - painel de todas as tentativas de ativacao
   - painel de tentativas suspeitas (multi-login/multi-server/denied)
+  - colunas `Bound (Login@Server)` e `Last IP`
 
 Credenciais padrao da UI:
 
@@ -95,6 +98,7 @@ Variaveis para alterar credenciais:
 
 - `INSIDEBOT_ADMIN_USERNAME`
 - `INSIDEBOT_ADMIN_PASSWORD`
+- `INSIDEBOT_LICENSE_LOCK_FIRST_ACTIVATION` (`true`/`false`, default `true`)
 - Restricao de IP do admin deve ser aplicada no Nginx em `/admin` e `/api/v1/admin/*`.
 
 ## 4. Execucao local (teste rapido)
@@ -200,9 +204,13 @@ Checklist completo (GitHub -> VPS -> HTTPS -> Go-live):
 - Bloquear acesso admin por IP (firewall/reverse proxy).
 - Backup diario do arquivo SQLite (`tools/license_data/licenses.db`).
 - Monitorar `validation_events` para detectar abuso.
+- Manter lock de primeiro acesso ativo para comercializacao (`INSIDEBOT_LICENSE_LOCK_FIRST_ACTIVATION=true`).
 
 ## 8. Observacoes do EA
 
 - `InsideBot` ja esta apontando por default para:
   - `LicenseServerBaseUrl = "https://insidebotcontrol.com.br"`
 - Em conta real, o cliente precisa liberar WebRequest no MT5 para o dominio.
+- Expiracao:
+  - em `OnInit`: bloqueia com `INIT_FAILED`
+  - em runtime: bloqueia no proximo ciclo de validacao (`LicenseCheckIntervalMinutes`)

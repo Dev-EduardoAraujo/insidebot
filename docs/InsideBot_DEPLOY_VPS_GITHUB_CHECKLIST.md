@@ -127,6 +127,7 @@ Ajustar no arquivo:
 - `WorkingDirectory=/opt/bot_MT5`
 - `ExecStart=/usr/bin/python3 /opt/bot_MT5/tools/insidebot_license_server.py`
 - `INSIDEBOT_LICENSE_ADMIN_KEY=<SUA_CHAVE>`
+- `INSIDEBOT_LICENSE_LOCK_FIRST_ACTIVATION=true`
 
 - [ ] Subir servico:
 
@@ -186,6 +187,15 @@ curl -sS -X POST "https://insidebotcontrol.com.br/api/v1/admin/license/upsert" \
   }'
 ```
 
+- [ ] (Opcional) Excluir token:
+
+```bash
+curl -sS -X POST "https://insidebotcontrol.com.br/api/v1/admin/license/delete" \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: SUA_CHAVE_ADMIN" \
+  -d '{"token":"TOK_CLIENTE_001"}'
+```
+
 - [ ] Validar endpoint do EA:
 
 ```bash
@@ -201,6 +211,10 @@ curl -sS -X POST "https://insidebotcontrol.com.br/api/v1/license/validate" \
     "build":"4750"
   }'
 ```
+
+- [ ] Confirmar lock de primeiro acesso:
+  - primeira validacao `VALID` fixa `login+server` no token.
+  - tentativa em outro login/server deve retornar `LOGIN_NOT_ALLOWED` ou `SERVER_NOT_ALLOWED`.
 
 ## 8. Processo de release para cliente
 
@@ -264,4 +278,3 @@ sudo journalctl -u insidebot-license.service -n 200 --no-pager
 - [ ] Chave admin forte e secreta.
 - [ ] Backup do SQLite em rotina.
 - [ ] `InsideBot` compilado e entregue em `.ex5`.
-

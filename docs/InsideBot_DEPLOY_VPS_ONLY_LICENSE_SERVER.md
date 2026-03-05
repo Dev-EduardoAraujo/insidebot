@@ -107,6 +107,7 @@ INSIDEBOT_LICENSE_DB=/opt/insidebot-license/license_data/licenses.db
 INSIDEBOT_LICENSE_HOST=127.0.0.1
 INSIDEBOT_LICENSE_PORT=8090
 INSIDEBOT_LICENSE_LOG_LEVEL=INFO
+INSIDEBOT_LICENSE_LOCK_FIRST_ACTIVATION=true
 EOF'
 sudo chmod 600 /etc/insidebot-license.env
 ```
@@ -162,6 +163,8 @@ Controle de acesso:
 
 - `/admin` e `/api/v1/admin/*` liberados apenas para `ADMIN_ALLOWED_IP`.
 - `/api/v1/license/validate` permanece publico para os EAs dos clientes.
+- O IP real do cliente e capturado via `X-Forwarded-For/X-Real-IP`.
+- Com `INSIDEBOT_LICENSE_LOCK_FIRST_ACTIVATION=true`, o primeiro `VALID` fixa `login+server` para o token.
 
 ## 11) Criar primeira licenca (API admin)
 
@@ -178,6 +181,15 @@ curl -sS -X POST "https://insidebotcontrol.com.br/api/v1/admin/license/upsert" \
     "active":true,
     "revoked":false
   }'
+```
+
+### Excluir token
+
+```bash
+curl -sS -X POST "https://insidebotcontrol.com.br/api/v1/admin/license/delete" \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: $ADMIN_KEY" \
+  -d '{"token":"TOK_CLIENTE_001"}'
 ```
 
 ## 12) Atualizacao futura (GitHub -> VPS minimal)
