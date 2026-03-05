@@ -285,11 +285,12 @@ function renderAllLicenses() {
         <td>${esc(formatDate(license.last_seen_at))}</td>
         <td>
           <div class="row wrap">
-            <button class="btn" data-action="edit" data-token="${esc(license.token)}">Edit</button>
-            <button class="btn btn-warning" data-action="extend30" data-token="${esc(license.token)}">+30d</button>
-            <button class="btn ${license.revoked ? "" : "btn-danger"}" data-action="toggleRevoke" data-token="${esc(license.token)}" data-revoked="${license.revoked ? "1" : "0"}">
+            <button class="btn" data-action="edit" data-token="${encodeURIComponent(license.token || "")}">Edit</button>
+            <button class="btn btn-warning" data-action="extend30" data-token="${encodeURIComponent(license.token || "")}">+30d</button>
+            <button class="btn ${license.revoked ? "" : "btn-danger"}" data-action="toggleRevoke" data-token="${encodeURIComponent(license.token || "")}" data-revoked="${license.revoked ? "1" : "0"}">
               ${license.revoked ? "Unrevoke" : "Revoke"}
             </button>
+            <button class="btn btn-danger" data-action="deleteToken" data-token="${encodeURIComponent(license.token || "")}">Delete</button>
           </div>
         </td>
       </tr>
@@ -549,6 +550,44 @@ async function extendLicense(token, days = 30) {
   await loadLicenses();
 }
 
+async function editLicense(token) {
+  const safeToken = String(token || "").trim();
+  if (!safeToken) throw new Error("Invalid token");
+  let license = state.licenses.find((x) => String(x.token || "") === safeToken);
+  if (!license) {
+    const query = new URLSearchParams();
+    query.set("limit", "50");
+    query.set("offset", "0");
+    query.set("token", safeToken);
+    const data = await apiGet(`/api/v1/admin/licenses?${query.toString()}`);
+    license = (data.items || []).find((x) => String(x.token || "") === safeToken) || null;
+  }
+  if (!license) throw new Error(`Token not found: ${safeToken}`);
+  fillFormFromLicense(license);
+  $("fToken").focus();
+  $("fToken").scrollIntoView({ behavior: "smooth", block: "center" });
+  toast(`Editing token: ${safeToken}`);
+}
+
+async function deleteLicense(token) {
+  const safeToken = String(token || "").trim();
+  if (!safeToken) throw new Error("Invalid token");
+
+  const confirm1 = confirm(`Excluir o token "${safeToken}"?`);
+  if (!confirm1) return;
+
+  const confirm2 = confirm(
+    `Confirmacao final:\nEsta acao e permanente e remove a licenca do token "${safeToken}".\nDeseja continuar?`
+  );
+  if (!confirm2) return;
+
+  await apiPost("/api/v1/admin/license/delete", { token: safeToken });
+  if (($("fToken").value || "").trim() === safeToken) clearForm();
+  delete state.tokenEventsCache[safeToken];
+  toast(`Token deleted: ${safeToken}`);
+  await loadLicenses();
+}
+
 async function runValidate() {
   const payload = {
     token: $("vToken").value.trim(),
@@ -677,17 +716,24 @@ function bindEvents() {
     const btn = event.target.closest("button[data-action]");
     if (!btn) return;
     const action = btn.getAttribute("data-action");
-    const token = btn.getAttribute("data-token");
+    const tokenRaw = btn.getAttribute("data-token") || "";
+    let token = tokenRaw;
+    try {
+      token = decodeURIComponent(tokenRaw);
+    } catch (_) {
+      token = tokenRaw;
+    }
     const revoked = btn.getAttribute("data-revoked") === "1";
 
     try {
       if (action === "edit") {
-        const license = state.licenses.find((x) => x.token === token);
-        if (license) fillFormFromLicense(license);
+        await editLicense(token);
       } else if (action === "toggleRevoke") {
         await toggleRevoke(token, revoked);
       } else if (action === "extend30") {
         await extendLicense(token, 30);
+      } else if (action === "deleteToken") {
+        await deleteLicense(token);
       }
     } catch (err) {
       toast(err.message);

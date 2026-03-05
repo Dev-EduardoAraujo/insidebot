@@ -31,6 +31,8 @@ Documentacao tecnica baseada no estado atual de `sliced/prime_botV2.mq5`.
 
 - Dominio de validacao: `https://insidebotcontrol.com.br`
 - Endpoint consumido pelo EA: `POST /api/v1/license/validate`
+- Documento canonico de licencas:
+  - `docs/InsideBot_CONTROLE_DE_LICENCAS.md`
 - Guia completo de deploy e operacao:
   - `docs/InsideBot_LICENSE_SERVER_SETUP.md`
   - `docs/InsideBot_SEGURANCA_COMERCIAL.md`

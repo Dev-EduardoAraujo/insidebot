@@ -296,6 +296,27 @@ class LicenseStore:
 
         return self.get_license(token)
 
+    def delete_license(self, token: str, delete_events: bool = False):
+        token = str(token).strip()
+        if not token:
+            raise ValueError("token is required")
+
+        deleted_events = 0
+        with self._write_lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM licenses WHERE token = ?", (token,))
+            if cursor.rowcount == 0:
+                raise ValueError("token not found")
+            if delete_events:
+                ev_cursor = conn.execute("DELETE FROM validation_events WHERE token = ?", (token,))
+                deleted_events = int(ev_cursor.rowcount or 0)
+            conn.commit()
+
+        return {
+            "token": token,
+            "deleted": True,
+            "deleted_events": deleted_events,
+        }
+
     def list_licenses(self, limit=200, offset=0, token=None):
         limit = max(1, min(int(limit), 1000))
         offset = max(0, int(offset))
@@ -827,6 +848,19 @@ class LicenseHandler(BaseHTTPRequestHandler):
                 expires_at = payload.get("expires_at")
                 row = self.server.store.extend_license(token, days=days, expires_at=expires_at)
                 self._send_json(200, {"ok": True, "license": row})
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+
+        if path == "/api/v1/admin/license/delete":
+            if not self._require_admin():
+                return
+            try:
+                payload = self._read_json()
+                token = str(payload.get("token", "")).strip()
+                delete_events = parse_bool(payload.get("delete_events"), False)
+                result = self.server.store.delete_license(token, delete_events=delete_events)
+                self._send_json(200, {"ok": True, "result": result})
             except ValueError as exc:
                 self._send_json(400, {"ok": False, "error": str(exc)})
             return

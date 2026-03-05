@@ -108,8 +108,8 @@ bool     EnableLogging = false;        // Gerar arquivo de log JSON
 ulong    MagicNumber = 765432;        // Numero magico
 bool     EnableLicenseValidation = true;
 string   LicenseServerBaseUrl = "https://insidebotcontrol.com.br";
-string   LicenseToken = "";
-string   LicensedCustomerName = "Italo";
+string   LicenseToken = "vizinho_teste";
+string   LicensedCustomerName = "Vizinho";
 int      LicenseCheckIntervalMinutes = 10;
 int      LicenseGracePeriodHours = 24;
 bool     EnforceLiveHedgeAccount = true;
@@ -370,6 +370,8 @@ ENUM_TIMEFRAMES g_visualBaseTimeframe = PERIOD_M5;
 bool IsSameCalendarDay(datetime a, datetime b);
 void ReleaseError(string code, string details = "");
 void RefreshWatermark();
+string ResolveLicenseDeniedDisplayMessage();
+void ShowLicenseDeniedDisplayMessage();
 bool EnforceAccountSecurity();
 string BuildLicenseValidationUrl();
 bool TryParseLicenseExpiryTimestamp(string rawValue, datetime &parsedTs);
@@ -660,6 +662,8 @@ bool ValidateLicenseOnline(bool logErrors = false)
    string expiresAtRaw = JsonGetStringValue(responseText, "expires_at", "");
    if(expiresAtRaw == "")
       expiresAtRaw = JsonGetStringValue(responseText, "valid_until", "");
+   string normalizedMessage = message;
+   StringToLower(normalizedMessage);
 
    g_lastLicenseValidationTime = TimeCurrent();
    g_licenseMessage = message;
@@ -682,7 +686,19 @@ bool ValidateLicenseOnline(bool logErrors = false)
 
    if(!allowed)
    {
-      g_licenseStatus = "DENIED";
+      if(normalizedMessage == "license_expired")
+      {
+         g_licenseExpired = true;
+         g_licenseStatus = "EXPIRED";
+      }
+      else if(normalizedMessage == "login_not_allowed" || normalizedMessage == "server_not_allowed")
+      {
+         g_licenseStatus = "ALREADY_USED";
+      }
+      else
+      {
+         g_licenseStatus = "DENIED";
+      }
       return false;
    }
 
@@ -798,6 +814,27 @@ void RefreshWatermark()
    if(clientName == "")
       clientName = "Nao identificado";
    Comment("InsideBot - Acesso(" + clientName + ")");
+}
+
+string ResolveLicenseDeniedDisplayMessage()
+{
+   string normalized = g_licenseMessage;
+   StringToLower(normalized);
+
+   if(g_licenseStatus == "EXPIRED" || normalized == "license_expired")
+      return "Renove sua licença";
+
+   if(g_licenseStatus == "ALREADY_USED" ||
+      normalized == "login_not_allowed" ||
+      normalized == "server_not_allowed")
+      return "Não foi dessa vez :)";
+
+   return "Licenca invalida";
+}
+
+void ShowLicenseDeniedDisplayMessage()
+{
+   Comment(ResolveLicenseDeniedDisplayMessage());
 }
 
 void ResetPendingLimitTelemetry()
@@ -3031,7 +3068,10 @@ int OnInit()
          return(INIT_FAILED);
 
       if(!ValidateLicenseAndApplyPolicy(true))
+      {
+         ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
+      }
 
       int licenseIntervalMinutes = (LicenseCheckIntervalMinutes < 1) ? 1 : LicenseCheckIntervalMinutes;
       g_nextLicenseCheckTime = TimeCurrent() + (licenseIntervalMinutes * 60);
@@ -3308,6 +3348,7 @@ void OnTick()
          if(!g_securityBlockLogged)
          {
             ReleaseError("LIC_RUNTIME_BLOCK", "Execucao bloqueada.");
+            ShowLicenseDeniedDisplayMessage();
             g_securityBlockLogged = true;
          }
          return;

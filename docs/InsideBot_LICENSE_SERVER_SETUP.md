@@ -2,6 +2,10 @@
 
 Este documento fecha a etapa comercial de licenciamento do `InsideBot`.
 
+Referencia principal atualizada:
+
+- `docs/InsideBot_CONTROLE_DE_LICENCAS.md`
+
 ## 1. Objetivo
 
 O EA valida licenca via:
