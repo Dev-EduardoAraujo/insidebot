@@ -108,8 +108,8 @@ bool     EnableLogging = false;        // Gerar arquivo de log JSON
 ulong    MagicNumber = 765432;        // Numero magico
 bool     EnableLicenseValidation = true;
 string   LicenseServerBaseUrl = "https://insidebotcontrol.com.br";
-string   LicenseToken = "vizinho_teste";
-string   LicensedCustomerName = "Vizinho";
+string   LicenseToken = "teste22";
+string   LicensedCustomerName = "teste22";
 int      LicenseCheckIntervalMinutes = 10;
 int      LicenseGracePeriodHours = 24;
 bool     EnforceLiveHedgeAccount = true;
@@ -266,6 +266,9 @@ string g_licenseStatus = "NOT_CHECKED";
 string g_licenseMessage = "";
 string g_licenseCustomerName = "";
 string g_lastUserBlockMessage = "";
+int g_lastLicenseHttpCode = 0;
+string g_lastLicenseResponseStatus = "";
+string g_lastLicenseResponseMessage = "";
 
 // Controle da virada pre-armada por STOP (hedging)
 ulong g_preArmedReversalOrderTicket = 0;
@@ -371,6 +374,8 @@ ENUM_TIMEFRAMES g_visualBaseTimeframe = PERIOD_M5;
 bool IsSameCalendarDay(datetime a, datetime b);
 void ReleaseError(string code, string details = "");
 void RefreshWatermark();
+string MaskLicenseToken(string token);
+void LogLicenseDeniedJournal(string context);
 string ResolveLicenseDeniedDisplayMessage();
 void ShowLicenseDeniedDisplayMessage();
 bool EnforceAccountSecurity();
@@ -597,10 +602,15 @@ bool TryParseLicenseExpiryTimestamp(string rawValue, datetime &parsedTs)
 
 bool ValidateLicenseOnline(bool logErrors = false)
 {
+   g_lastLicenseHttpCode = 0;
+   g_lastLicenseResponseStatus = "";
+   g_lastLicenseResponseMessage = "";
+
    if(!EnableLicenseValidation)
    {
       g_licenseStatus = "DISABLED_RELEASE";
       g_licenseMessage = "license_validation_mandatory";
+      LogLicenseDeniedJournal("ValidateLicenseOnline:disabled_release");
       return false;
    }
 
@@ -610,13 +620,20 @@ bool ValidateLicenseOnline(bool logErrors = false)
       if(logErrors)
          ReleaseError("LIC_URL", "LicenseServerBaseUrl vazio.");
       g_licenseStatus = "URL_EMPTY";
+      g_licenseMessage = "license_url_empty";
+      LogLicenseDeniedJournal("ValidateLicenseOnline:url_empty");
       return false;
    }
-   if(LicenseToken == "")
+   string licenseToken = LicenseToken;
+   StringTrimLeft(licenseToken);
+   StringTrimRight(licenseToken);
+   if(licenseToken == "")
    {
       if(logErrors)
          ReleaseError("LIC_TOKEN", "LicenseToken vazio.");
       g_licenseStatus = "TOKEN_EMPTY";
+      g_licenseMessage = "license_token_empty";
+      LogLicenseDeniedJournal("ValidateLicenseOnline:token_empty");
       return false;
    }
 
@@ -628,7 +645,7 @@ bool ValidateLicenseOnline(bool logErrors = false)
    string buildText = IntegerToString((int)TerminalInfoInteger(TERMINAL_BUILD));
 
    string payload = "{";
-   payload += "\"token\":\"" + JsonEscape(LicenseToken) + "\",";
+   payload += "\"token\":\"" + JsonEscape(licenseToken) + "\",";
    payload += "\"login\":\"" + StringFormat("%I64d", login) + "\",";
    payload += "\"server\":\"" + JsonEscape(accountServer) + "\",";
    payload += "\"company\":\"" + JsonEscape(accountCompany) + "\",";
@@ -638,7 +655,10 @@ bool ValidateLicenseOnline(bool logErrors = false)
    payload += "}";
 
    char postData[];
-   StringToCharArray(payload, postData, 0, WHOLE_ARRAY, CP_UTF8);
+   int utf8Len = StringToCharArray(payload, postData, 0, WHOLE_ARRAY, CP_UTF8);
+   // Remove trailing null terminator from HTTP body to avoid BAD_JSON on server parser.
+   if(utf8Len > 0 && ArraySize(postData) > 0 && postData[ArraySize(postData) - 1] == 0)
+      ArrayResize(postData, ArraySize(postData) - 1);
    char responseData[];
    string responseHeaders = "";
    string requestHeaders = "Content-Type: application/json\r\n";
@@ -650,14 +670,19 @@ bool ValidateLicenseOnline(bool logErrors = false)
       int err = GetLastError();
       g_licenseStatus = "HTTP_ERROR";
       g_licenseMessage = "webrequest_error_" + IntegerToString(err);
+      g_lastLicenseHttpCode = httpCode;
+      g_lastLicenseResponseStatus = "HTTP_ERROR";
+      g_lastLicenseResponseMessage = g_licenseMessage;
       if(logErrors)
          ReleaseError("LIC_HTTP", "WebRequest falhou.");
+      LogLicenseDeniedJournal("ValidateLicenseOnline:webrequest_error");
       return false;
    }
 
    string responseText = CharArrayToString(responseData, 0, -1, CP_UTF8);
    bool revoked = JsonGetBoolValue(responseText, "revoked", false);
    bool allowed = JsonGetBoolValue(responseText, "allowed", false);
+   string statusText = JsonGetStringValue(responseText, "status", "");
    string customer = JsonGetStringValue(responseText, "customer_name", "");
    string message = JsonGetStringValue(responseText, "message", "");
    string expiresAtRaw = JsonGetStringValue(responseText, "expires_at", "");
@@ -668,6 +693,9 @@ bool ValidateLicenseOnline(bool logErrors = false)
 
    g_lastLicenseValidationTime = TimeCurrent();
    g_licenseMessage = message;
+   g_lastLicenseHttpCode = httpCode;
+   g_lastLicenseResponseStatus = statusText;
+   g_lastLicenseResponseMessage = message;
    g_licenseExpired = false;
    g_licenseExpiresAt = 0;
 
@@ -682,6 +710,7 @@ bool ValidateLicenseOnline(bool logErrors = false)
    {
       g_licenseRevoked = true;
       g_licenseStatus = "REVOKED";
+      LogLicenseDeniedJournal("ValidateLicenseOnline:revoked");
       return false;
    }
 
@@ -700,6 +729,7 @@ bool ValidateLicenseOnline(bool logErrors = false)
       {
          g_licenseStatus = "DENIED";
       }
+      LogLicenseDeniedJournal("ValidateLicenseOnline:not_allowed");
       return false;
    }
 
@@ -709,6 +739,7 @@ bool ValidateLicenseOnline(bool logErrors = false)
       g_licenseStatus = "EXPIRED";
       if(g_licenseMessage == "")
          g_licenseMessage = "license_expired";
+      LogLicenseDeniedJournal("ValidateLicenseOnline:expired_local");
       return false;
    }
 
@@ -748,6 +779,7 @@ bool ValidateLicenseAndApplyPolicy(bool logErrors = false)
       g_licenseMessage = "license_validation_mandatory";
       if(logErrors)
          ReleaseError("LIC_RELEASE", "Validacao obrigatoria.");
+      LogLicenseDeniedJournal("ValidateLicenseAndApplyPolicy:disabled_release");
       return false;
    }
 
@@ -763,6 +795,7 @@ bool ValidateLicenseAndApplyPolicy(bool logErrors = false)
       g_securityBlockTrading = true;
       if(logErrors)
          ReleaseError("LIC_REVOKED", "Licenca revogada.");
+      LogLicenseDeniedJournal("ValidateLicenseAndApplyPolicy:revoked");
       return false;
    }
 
@@ -771,6 +804,7 @@ bool ValidateLicenseAndApplyPolicy(bool logErrors = false)
       g_securityBlockTrading = true;
       if(logErrors)
          ReleaseError("LIC_EXPIRED", "Licenca expirada.");
+      LogLicenseDeniedJournal("ValidateLicenseAndApplyPolicy:expired");
       return false;
    }
 
@@ -784,6 +818,7 @@ bool ValidateLicenseAndApplyPolicy(bool logErrors = false)
    g_securityBlockTrading = true;
    if(logErrors)
       ReleaseError("LIC_BLOCK", "Licenca invalida.");
+   LogLicenseDeniedJournal("ValidateLicenseAndApplyPolicy:blocked");
    return false;
 }
 
@@ -795,12 +830,18 @@ bool EnforceAccountSecurity()
    if(g_accountTradeMode != ACCOUNT_TRADE_MODE_REAL)
    {
       ReleaseError("ACCOUNT_MODE", "Conta nao permitida.");
+      g_licenseStatus = "ACCOUNT_DENIED";
+      g_licenseMessage = "account_not_real";
+      LogLicenseDeniedJournal("EnforceAccountSecurity:not_real");
       return false;
    }
 
    if(!g_isHedgingAccount)
    {
       ReleaseError("MARGIN_MODE", "Modo de margem nao permitido.");
+      g_licenseStatus = "ACCOUNT_DENIED";
+      g_licenseMessage = "account_not_hedge";
+      LogLicenseDeniedJournal("EnforceAccountSecurity:not_hedge");
       return false;
    }
 
@@ -830,8 +871,26 @@ string ResolveLicenseDeniedDisplayMessage()
       normalized == "server_not_allowed")
       return "Não foi dessa vez :)";
 
-   if(g_licenseStatus == "ACCOUNT_DENIED" || normalized == "account_not_allowed")
+   if(g_licenseStatus == "ACCOUNT_DENIED" ||
+      normalized == "account_not_allowed" ||
+      normalized == "account_not_real" ||
+      normalized == "account_not_hedge")
       return "Conta não autorizada";
+
+   if(normalized == "token_not_found")
+      return "Token invalido";
+
+   if(normalized == "license_disabled")
+      return "Licenca desativada";
+
+   if(g_licenseStatus == "REVOKED" || normalized == "license_revoked")
+      return "Licenca revogada";
+
+   if(g_licenseStatus == "HTTP_ERROR" || StringFind(normalized, "webrequest_error_") == 0)
+      return "Falha de conexao com o servidor";
+
+   if(normalized == "invalid_json")
+      return "Falha de comunicacao com o servidor";
 
    return "Licenca invalida";
 }
@@ -842,6 +901,37 @@ void ShowLicenseDeniedDisplayMessage()
    g_lastUserBlockMessage = msg;
    Comment(msg);
    Print(msg);
+}
+
+string MaskLicenseToken(string token)
+{
+   string t = token;
+   StringTrimLeft(t);
+   StringTrimRight(t);
+   int n = StringLen(t);
+   if(n <= 0)
+      return "(empty)";
+   if(n <= 4)
+      return "***";
+   return StringSubstr(t, 0, 2) + "***" + StringSubstr(t, n - 2);
+}
+
+void LogLicenseDeniedJournal(string context)
+{
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   string server = AccountInfoString(ACCOUNT_SERVER);
+   string tokenMasked = MaskLicenseToken(LicenseToken);
+   Print("LIC_DENIED | context=", context,
+         " | status=", g_licenseStatus,
+         " | message=", g_licenseMessage,
+         " | server_status=", g_lastLicenseResponseStatus,
+         " | server_message=", g_lastLicenseResponseMessage,
+         " | http=", IntegerToString(g_lastLicenseHttpCode),
+         " | revoked=", (g_licenseRevoked ? "1" : "0"),
+         " | expired=", (g_licenseExpired ? "1" : "0"),
+         " | login=", StringFormat("%I64d", login),
+         " | server=", server,
+         " | token=", tokenMasked);
 }
 
 void ResetPendingLimitTelemetry()
@@ -3058,6 +3148,7 @@ int OnInit()
          ReleaseError("LIC_RELEASE", "EnableLicenseValidation deve ficar true.");
          g_licenseStatus = "DISABLED_RELEASE";
          g_licenseMessage = "license_validation_mandatory";
+         LogLicenseDeniedJournal("OnInit:license_validation_disabled");
          ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
       }
@@ -3067,6 +3158,7 @@ int OnInit()
          ReleaseError("LIC_URL", "LicenseServerBaseUrl vazio.");
          g_licenseStatus = "URL_EMPTY";
          g_licenseMessage = "license_url_empty";
+         LogLicenseDeniedJournal("OnInit:license_url_empty");
          ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
       }
@@ -3076,20 +3168,25 @@ int OnInit()
          ReleaseError("LIC_TOKEN", "LicenseToken vazio.");
          g_licenseStatus = "TOKEN_EMPTY";
          g_licenseMessage = "license_token_empty";
+         LogLicenseDeniedJournal("OnInit:license_token_empty");
          ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
       }
 
       if(!EnforceAccountSecurity())
       {
-         g_licenseStatus = "ACCOUNT_DENIED";
-         g_licenseMessage = "account_not_allowed";
+         if(g_licenseStatus == "" || g_licenseStatus == "NOT_CHECKED" || g_licenseStatus == "VALID")
+            g_licenseStatus = "ACCOUNT_DENIED";
+         if(g_licenseMessage == "")
+            g_licenseMessage = "account_not_allowed";
          ShowLicenseDeniedDisplayMessage();
+         LogLicenseDeniedJournal("OnInit:account_security");
          return(INIT_FAILED);
       }
 
       if(!ValidateLicenseAndApplyPolicy(true))
       {
+         LogLicenseDeniedJournal("OnInit:validate_policy_failed");
          ShowLicenseDeniedDisplayMessage();
          return(INIT_FAILED);
       }
@@ -3381,6 +3478,7 @@ void OnTick()
          if(!g_securityBlockLogged)
          {
             ReleaseError("LIC_RUNTIME_BLOCK", "Execucao bloqueada.");
+            LogLicenseDeniedJournal("OnTick:runtime_block");
             ShowLicenseDeniedDisplayMessage();
             g_securityBlockLogged = true;
          }

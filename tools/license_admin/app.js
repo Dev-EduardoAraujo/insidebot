@@ -270,7 +270,7 @@ function licenseStatusCell(license) {
 function renderAllLicenses() {
   const body = $("licensesBody");
   if (!state.licenses.length) {
-    body.innerHTML = `<tr><td colspan="8">No licenses found.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10">No licenses found.</td></tr>`;
     return;
   }
   body.innerHTML = state.licenses
@@ -282,6 +282,8 @@ function renderAllLicenses() {
         <td>${esc(formatDate(license.expires_at))}</td>
         <td>${esc((license.allowed_logins || []).join(", ")) || "-"}</td>
         <td>${esc((license.allowed_servers || []).join(", ")) || "-"}</td>
+        <td>${esc(`${license.bound_login || "-"} @ ${license.bound_server || "-"}`)}</td>
+        <td>${esc(license.last_remote_ip || "-")}</td>
         <td>${esc(formatDate(license.last_seen_at))}</td>
         <td>
           <div class="row wrap">
@@ -380,7 +382,7 @@ function renderActiveLicenses() {
   const body = $("activeLicensesBody");
   const active = state.licenses.filter(isLicenseActive);
   if (!active.length) {
-    body.innerHTML = `<tr><td colspan="7">No active licenses found.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9">No active licenses found.</td></tr>`;
     return;
   }
 
@@ -399,6 +401,8 @@ function renderActiveLicenses() {
         <td>${esc(formatDate(license.expires_at))}</td>
         <td>${esc((license.allowed_logins || []).join(", ")) || "-"}</td>
         <td>${esc((license.allowed_servers || []).join(", ")) || "-"}</td>
+        <td>${esc(`${license.bound_login || "-"} @ ${license.bound_server || "-"}`)}</td>
+        <td>${esc(license.last_remote_ip || "-")}</td>
         <td>${esc(formatDate(license.last_seen_at))}</td>
         <td>
           <details class="dropdown" data-action="opsDropdown" data-token="${esc(token)}" data-token-key="${key}">

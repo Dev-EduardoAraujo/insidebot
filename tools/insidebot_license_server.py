@@ -139,7 +139,12 @@ class LicenseStore:
                     last_login TEXT,
                     last_server TEXT,
                     last_program TEXT,
-                    last_build TEXT
+                    last_build TEXT,
+                    last_remote_ip TEXT,
+                    bound_at TEXT,
+                    bound_login TEXT,
+                    bound_server TEXT,
+                    bound_ip TEXT
                 )
                 """
             )
@@ -167,7 +172,23 @@ class LicenseStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_validation_events_token_time ON validation_events(token, event_time DESC)"
             )
+            self._ensure_column(conn, "licenses", "last_remote_ip TEXT")
+            self._ensure_column(conn, "licenses", "bound_at TEXT")
+            self._ensure_column(conn, "licenses", "bound_login TEXT")
+            self._ensure_column(conn, "licenses", "bound_server TEXT")
+            self._ensure_column(conn, "licenses", "bound_ip TEXT")
             conn.commit()
+
+    @staticmethod
+    def _ensure_column(conn, table_name: str, column_def: str):
+        column_name = str(column_def).split()[0].strip()
+        if not column_name:
+            return
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        existing = {str(r["name"]).strip().lower() for r in rows}
+        if column_name.lower() in existing:
+            return
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_def}")
 
     @staticmethod
     def _row_to_license(row):
@@ -191,6 +212,11 @@ class LicenseStore:
             "last_server": row["last_server"],
             "last_program": row["last_program"],
             "last_build": row["last_build"],
+            "last_remote_ip": row["last_remote_ip"],
+            "bound_at": row["bound_at"],
+            "bound_login": row["bound_login"],
+            "bound_server": row["bound_server"],
+            "bound_ip": row["bound_ip"],
         }
 
     def get_license(self, token: str):
@@ -414,10 +440,11 @@ class LicenseStore:
             )
             conn.commit()
 
-    def validate(self, payload: dict, remote_ip: str):
+    def validate(self, payload: dict, remote_ip: str, lock_first_activation: bool = True):
         token = str(payload.get("token", "")).strip()
         login = str(payload.get("login", "")).strip()
         server_name = str(payload.get("server", "")).strip()
+        normalized_server = server_name.lower()
 
         response = {
             "allowed": False,
@@ -464,6 +491,22 @@ class LicenseStore:
             self._record_event(payload, response, remote_ip)
             return response
 
+        bound_login = str(license_row.get("bound_login") or "").strip()
+        bound_server = str(license_row.get("bound_server") or "").strip().lower()
+        if bound_login:
+            if login == "" or login != bound_login:
+                response["message"] = "login_not_allowed"
+                response["status"] = "LOGIN_NOT_ALLOWED"
+                self._record_event(payload, response, remote_ip)
+                return response
+
+        if bound_server:
+            if normalized_server == "" or normalized_server != bound_server:
+                response["message"] = "server_not_allowed"
+                response["status"] = "SERVER_NOT_ALLOWED"
+                self._record_event(payload, response, remote_ip)
+                return response
+
         if license_row["allowed_logins"]:
             if login == "" or login not in [str(x) for x in license_row["allowed_logins"]]:
                 response["message"] = "login_not_allowed"
@@ -472,7 +515,6 @@ class LicenseStore:
                 return response
 
         if license_row["allowed_servers"]:
-            normalized_server = server_name.lower()
             allowed_servers = [str(x).lower() for x in license_row["allowed_servers"]]
             if normalized_server == "" or normalized_server not in allowed_servers:
                 response["message"] = "server_not_allowed"
@@ -480,11 +522,47 @@ class LicenseStore:
                 self._record_event(payload, response, remote_ip)
                 return response
 
+        if lock_first_activation:
+            needs_bind_login = not bound_login
+            needs_bind_server = not bound_server
+            if needs_bind_login or needs_bind_server:
+                if login == "" or normalized_server == "":
+                    response["message"] = "bind_missing_login_or_server"
+                    response["status"] = "BIND_MISSING_LOGIN_OR_SERVER"
+                    self._record_event(payload, response, remote_ip)
+                    return response
+                now_iso = to_iso_utc(utc_now())
+                new_bound_login = bound_login or login
+                new_bound_server = bound_server or normalized_server
+                with self._write_lock, self._connect() as conn:
+                    conn.execute(
+                        """
+                        UPDATE licenses
+                        SET bound_login = ?,
+                            bound_server = ?,
+                            bound_ip = COALESCE(bound_ip, ?),
+                            bound_at = COALESCE(bound_at, ?),
+                            updated_at = ?
+                        WHERE token = ?
+                        """,
+                        (
+                            new_bound_login,
+                            new_bound_server,
+                            remote_ip,
+                            now_iso,
+                            now_iso,
+                            token,
+                        ),
+                    )
+                    conn.commit()
+                bound_login = new_bound_login
+                bound_server = new_bound_server
+
         with self._write_lock, self._connect() as conn:
             conn.execute(
                 """
                 UPDATE licenses
-                SET last_seen_at = ?, last_login = ?, last_server = ?, last_program = ?, last_build = ?, updated_at = ?
+                SET last_seen_at = ?, last_login = ?, last_server = ?, last_program = ?, last_build = ?, last_remote_ip = ?, updated_at = ?
                 WHERE token = ?
                 """,
                 (
@@ -493,6 +571,7 @@ class LicenseStore:
                     server_name,
                     str(payload.get("program", "")).strip(),
                     str(payload.get("build", "")).strip(),
+                    remote_ip,
                     to_iso_utc(utc_now()),
                     token,
                 ),
@@ -516,6 +595,7 @@ class LicenseHTTPServer(ThreadingHTTPServer):
         admin_username: str,
         admin_password: str,
         session_ttl_seconds: int,
+        lock_first_activation: bool,
     ):
         super().__init__(server_address, handler_class)
         self.store = store
@@ -523,6 +603,7 @@ class LicenseHTTPServer(ThreadingHTTPServer):
         self.admin_username = admin_username
         self.admin_password = admin_password
         self.session_ttl_seconds = max(300, int(session_ttl_seconds))
+        self.lock_first_activation = bool(lock_first_activation)
         self._sessions = {}
         self._session_lock = threading.Lock()
 
@@ -673,6 +754,19 @@ class LicenseHandler(BaseHTTPRequestHandler):
             return ""
         return auth[7:].strip()
 
+    def _get_remote_ip(self):
+        xff = self.headers.get("X-Forwarded-For", "").strip()
+        if xff:
+            first = xff.split(",")[0].strip()
+            if first:
+                return first
+        xreal = self.headers.get("X-Real-IP", "").strip()
+        if xreal:
+            return xreal
+        if self.client_address:
+            return str(self.client_address[0])
+        return ""
+
     def _has_admin_access(self):
         admin_key = getattr(self.server, "admin_key", "")
         sent_key = self.headers.get("X-Admin-Key", "").strip()
@@ -780,7 +874,7 @@ class LicenseHandler(BaseHTTPRequestHandler):
                     "admin login denied user=%s payload_keys=%s ip=%s",
                     username,
                     ",".join(sorted([str(k) for k in payload.keys()])),
-                    self.client_address[0] if self.client_address else "",
+                    self._get_remote_ip(),
                 )
                 self._send_json(401, {"ok": False, "error": "invalid_credentials"})
                 return
@@ -809,8 +903,12 @@ class LicenseHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._send_json(400, {"allowed": False, "revoked": False, "message": "invalid_json", "status": "BAD_JSON"})
                 return
-            remote_ip = self.client_address[0] if self.client_address else ""
-            result = self.server.store.validate(payload, remote_ip)
+            remote_ip = self._get_remote_ip()
+            result = self.server.store.validate(
+                payload,
+                remote_ip,
+                lock_first_activation=getattr(self.server, "lock_first_activation", True),
+            )
             self._send_json(200, result)
             return
 
@@ -879,6 +977,7 @@ def main():
     parser.add_argument("--admin-key", default=os.getenv("INSIDEBOT_LICENSE_ADMIN_KEY", ""))
     parser.add_argument("--admin-username", default=os.getenv("INSIDEBOT_ADMIN_USERNAME", "admin"))
     parser.add_argument("--admin-password", default=os.getenv("INSIDEBOT_ADMIN_PASSWORD", "F82615225b"))
+    parser.add_argument("--lock-first-activation", default=os.getenv("INSIDEBOT_LICENSE_LOCK_FIRST_ACTIVATION", "true"))
     parser.add_argument(
         "--session-ttl-seconds",
         type=int,
@@ -902,6 +1001,7 @@ def main():
         admin_username=args.admin_username,
         admin_password=args.admin_password,
         session_ttl_seconds=args.session_ttl_seconds,
+        lock_first_activation=parse_bool(args.lock_first_activation, True),
     )
 
     if not args.admin_key:
