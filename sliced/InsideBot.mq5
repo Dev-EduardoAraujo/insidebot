@@ -8,7 +8,7 @@
 
 #include <Trade/Trade.mqh>
 CTrade trade;
-bool g_releaseInfoLogsEnabled = false;
+const bool g_releaseInfoLogsEnabled = false; // release: nunca expor logs de estrategia
 
 enum EDrawdownPercentReference
 {
@@ -103,9 +103,9 @@ double   NegativeAddTPDistancePercent = 100.0;  // Novo TP em % da distancia da 
 bool     NegativeAddTPAdjustOnReversal = false; // Ajustar TP apos addon tambem em operacoes de virada
 bool     EnableNegativeAddDebugLogs = false; // Gerar logs de diagnostico da adicao negativa
 int      NegativeAddDebugIntervalSeconds = 60; // Intervalo minimo para repetir log igual (seg)
-bool     DrawChannels = true;         // Desenhar canais no grafico
+bool     DrawChannels = false;         // Desenhar canais no grafico
 bool     EnableLogging = false;        // Gerar arquivo de log JSON
-ulong    MagicNumber = 765432;        // Numero magico
+ulong    MagicNumber = 050326;        // Numero magico
 bool     EnableLicenseValidation = true;
 string   LicenseServerBaseUrl = "https://insidebotcontrol.com.br";
 string   LicenseToken = "teste12345";
@@ -3890,7 +3890,6 @@ void CalculateOpeningChannel()
    datetime vela4_closeTime = vela4_time + PeriodSeconds(g_activeTimeframe);
    if(currentTime < vela4_closeTime)
    {
-      if(g_releaseInfoLogsEnabled) Print(" Aguardando fechamento da 4a vela... Fecha as: ", TimeToString(vela4_closeTime, TIME_MINUTES));
       return;
    }
 

@@ -51,8 +51,13 @@ function updateAuthState() {
 
 function setOverlayVisible(visible) {
   const overlay = $("loginOverlay");
-  if (visible) overlay.classList.remove("hidden");
-  else overlay.classList.add("hidden");
+  if (visible) {
+    overlay.classList.remove("hidden");
+    document.body.classList.add("app-locked");
+  } else {
+    overlay.classList.add("hidden");
+    document.body.classList.remove("app-locked");
+  }
 }
 
 function setOverlayError(message) {
