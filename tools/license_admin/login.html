@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InsideBot Admin Login</title>
+  <link rel="stylesheet" href="/login/styles.css">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card">
+      <h1>InsideBot License Admin</h1>
+      <p class="muted">Autentique-se para acessar o painel em <code>/admin</code>.</p>
+
+      <label>
+        API Base URL
+        <input id="baseUrl" type="text" />
+      </label>
+      <label>
+        Username
+        <input id="username" type="text" value="admin" />
+      </label>
+      <label>
+        Password
+        <input id="password" type="password" />
+      </label>
+
+      <div class="row wrap">
+        <button id="loginBtn" class="btn btn-primary">Login</button>
+        <button id="testConnBtn" class="btn">Test Connection</button>
+      </div>
+
+      <p id="statusText" class="muted"></p>
+      <p id="errorText" class="error-text"></p>
+    </section>
+  </main>
+
+  <script src="/login/login.js"></script>
+</body>
+</html>

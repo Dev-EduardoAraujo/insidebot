@@ -277,7 +277,7 @@
                         </div>
 
                         <div class="metric-section-title">
-                            <span>PCM</span>
+                            <span id="secondaryOpsCardLabel">Recontagem</span>
                             <span class="metric-section-pnl" id="pcmOpsPnL">-</span>
                         </div>
                         <div class="metric-row">
@@ -359,6 +359,10 @@
                 <div class="metric-card">
                     <h3 class="metric-title">Analise por Dia da Semana</h3>
                     <div class="metric-table" id="weekdayTable"></div>
+                </div>
+                <div class="metric-card">
+                    <h3 class="metric-title">Dia da Semana por Flag</h3>
+                    <div class="metric-table" id="weekdayFlagTable"></div>
                 </div>
                 <div class="metric-card">
                     <h3 class="metric-title">Analise por Hora de Entrada</h3>
@@ -447,9 +451,9 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M5 13l4 4L19 7"/>
                     </svg>
-                    <strong>Operacoes TP</strong>
+                    <strong id="firstOpsTpTitle">Operacoes First_op TP</strong>
                 </summary>
-                <div class="params-content" id="tpOps"></div>
+                <div class="params-content" id="firstTpOps"></div>
             </details>
 
             <details class="params-dropdown">
@@ -457,19 +461,9 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M6 18L18 6M6 6l12 12"/>
                     </svg>
-                    <strong>Operacoes SL</strong>
+                    <strong id="firstOpsSlTitle">Operacoes First_op SL</strong>
                 </summary>
-                <div class="params-content" id="slOps"></div>
-            </details>
-
-            <details class="params-dropdown">
-                <summary class="params-summary">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
-                    </svg>
-                    <strong>Operacoes TurnOf</strong>
-                </summary>
-                <div class="params-content" id="reversalOps"></div>
+                <div class="params-content" id="firstSlOps"></div>
             </details>
 
             <details class="params-dropdown">
@@ -478,7 +472,49 @@
                         <path d="M12 2v20M2 12h20"/>
                         <path d="M7 7h10v10H7z"/>
                     </svg>
-                    <strong>Operacoes PCM TP</strong>
+                    <strong id="firstOpsBeTitle">Operacoes First_op BE</strong>
+                </summary>
+                <div class="params-content" id="firstBeOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <strong id="turnofOpsTpTitle">Operacoes TurnOf TP</strong>
+                </summary>
+                <div class="params-content" id="turnofTpOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                    <strong id="turnofOpsSlTitle">Operacoes TurnOf SL</strong>
+                </summary>
+                <div class="params-content" id="turnofSlOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M2 12h20"/>
+                        <path d="M7 7h10v10H7z"/>
+                    </svg>
+                    <strong id="turnofOpsBeTitle">Operacoes TurnOf BE</strong>
+                </summary>
+                <div class="params-content" id="turnofBeOps"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M2 12h20"/>
+                        <path d="M7 7h10v10H7z"/>
+                    </svg>
+                    <strong id="secondaryOpsTpTitle">Operacoes Recontagem TP</strong>
                 </summary>
                 <div class="params-content" id="pcmTpOps"></div>
             </details>
@@ -489,7 +525,7 @@
                         <path d="M12 2v20M2 12h20"/>
                         <path d="M7 7h10v10H7z"/>
                     </svg>
-                    <strong>Operacoes PCM SL</strong>
+                    <strong id="secondaryOpsSlTitle">Operacoes Recontagem SL</strong>
                 </summary>
                 <div class="params-content" id="pcmSlOps"></div>
             </details>
@@ -500,7 +536,7 @@
                         <path d="M12 2v20M2 12h20"/>
                         <path d="M7 7h10v10H7z"/>
                     </svg>
-                    <strong>Operacoes PCM BE</strong>
+                    <strong id="secondaryOpsBeTitle">Operacoes Recontagem BE</strong>
                 </summary>
                 <div class="params-content" id="pcmBeOps"></div>
             </details>
@@ -513,6 +549,17 @@
                     <strong>Dias sem Operacao (NoTrade)</strong>
                 </summary>
                 <div class="params-content" id="noTradeDropdown"></div>
+            </details>
+
+            <details class="params-dropdown">
+                <summary class="params-summary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18"/>
+                        <path d="M7 15l4-4 3 3 5-5"/>
+                    </svg>
+                    <strong>First_op nao ativada (LIMIT)</strong>
+                </summary>
+                <div class="params-content" id="firstOpNotActivatedDropdown"></div>
             </details>
         </main>
     </div>

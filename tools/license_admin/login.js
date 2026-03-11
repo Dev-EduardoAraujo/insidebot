@@ -1,0 +1,132 @@
+const $ = (id) => document.getElementById(id);
+
+const STORAGE_BASE_URL = "insidebot_admin_base_url";
+const STORAGE_AUTH_TOKEN = "insidebot_admin_auth_token";
+const STORAGE_AUTH_USER = "insidebot_admin_auth_user";
+
+function setStatus(message) {
+  $("statusText").textContent = message || "";
+}
+
+function setError(message) {
+  $("errorText").textContent = message || "";
+}
+
+function getBaseUrl() {
+  return ($("baseUrl").value || window.location.origin).trim().replace(/\/+$/, "");
+}
+
+function saveBaseUrl() {
+  localStorage.setItem(STORAGE_BASE_URL, getBaseUrl());
+}
+
+function getToken() {
+  return (localStorage.getItem(STORAGE_AUTH_TOKEN) || "").trim();
+}
+
+function setAuth(token, username) {
+  if (token) {
+    localStorage.setItem(STORAGE_AUTH_TOKEN, token);
+  } else {
+    localStorage.removeItem(STORAGE_AUTH_TOKEN);
+  }
+  if (username) {
+    localStorage.setItem(STORAGE_AUTH_USER, username);
+  } else {
+    localStorage.removeItem(STORAGE_AUTH_USER);
+  }
+}
+
+async function fetchJson(path, options = {}) {
+  const resp = await fetch(`${getBaseUrl()}${path}`, options);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || data.message || `HTTP ${resp.status}`);
+  }
+  return data;
+}
+
+async function checkExistingSession() {
+  const token = getToken();
+  if (!token) return false;
+  try {
+    await fetchJson("/api/v1/admin/auth/check", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    window.location.replace("/admin");
+    return true;
+  } catch (_) {
+    setAuth("", "");
+    return false;
+  }
+}
+
+async function testConnection() {
+  setError("");
+  setStatus("Testing connection...");
+  try {
+    const data = await fetchJson("/api/health", { method: "GET" });
+    setStatus(`Connected (${data.time_utc || "ok"})`);
+  } catch (err) {
+    setStatus("");
+    setError(`Connection failed: ${err.message}`);
+  }
+}
+
+async function doLogin() {
+  const username = ($("username").value || "").trim() || "admin";
+  const password = ($("password").value || "").trim();
+  if (!password) {
+    setError("Password is required.");
+    return;
+  }
+
+  saveBaseUrl();
+  setError("");
+  setStatus("Authenticating...");
+
+  try {
+    const data = await fetchJson("/api/v1/admin/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    setAuth(data.token || "", data.username || username);
+    window.location.replace("/admin");
+  } catch (err) {
+    setStatus("");
+    setError(`Login failed: ${err.message}`);
+  }
+}
+
+function explainReason() {
+  const reason = new URLSearchParams(window.location.search).get("reason") || "";
+  if (reason === "session_expired") {
+    setStatus("Your session expired. Please login again.");
+  } else if (reason === "logged_out") {
+    setStatus("You have been logged out.");
+  } else if (reason === "missing_session") {
+    setStatus("Please login to continue.");
+  }
+}
+
+function bindEvents() {
+  $("loginBtn").addEventListener("click", doLogin);
+  $("testConnBtn").addEventListener("click", testConnection);
+  $("password").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      doLogin();
+    }
+  });
+}
+
+async function init() {
+  $("baseUrl").value = localStorage.getItem(STORAGE_BASE_URL) || window.location.origin;
+  $("username").value = localStorage.getItem(STORAGE_AUTH_USER) || "admin";
+  bindEvents();
+  explainReason();
+  await checkExistingSession();
+}
+
+init();

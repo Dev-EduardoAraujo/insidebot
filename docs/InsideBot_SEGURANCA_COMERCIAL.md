@@ -7,9 +7,10 @@
 - Janela de graca offline controlada por `LicenseGracePeriodHours`.
 - Restricao de conta: apenas `ACCOUNT_TRADE_MODE_REAL` + `ACCOUNT_MARGIN_MODE_RETAIL_HEDGING`.
 - Watermark em tela: `InsideBot - Acesso(<cliente>)`.
-- Logs estrategicos silenciados por padrao.
+- Logs estrategicos silenciados por build (`g_releaseInfoLogsEnabled=false` em runtime).
 - JSON de operacoes sanitizado e salvamento silencioso.
 - URL de validacao default no release atual: `https://insidebotcontrol.com.br`.
+- Telemetria de operacoes fechadas enviada para o servidor via `/api/v1/ops/ingest`.
 
 ## Parametros de seguranca (build/release)
 
@@ -57,6 +58,18 @@ Response JSON esperado:
 }
 ```
 
+## Contrato de telemetria de operacoes
+
+URL:
+
+- `POST {LicenseServerBaseUrl}/api/v1/ops/ingest`
+
+Resumo:
+
+- envio no fechamento da operacao
+- inclui `operation_code`, `operation_chain_code`, `result`, `direction`
+- inclui campos de PnL: `profit_gross`, `swap`, `commission`, `fee`, `costs_total`, `profit_net`
+
 ## Servidor e operacao
 
 Arquivos:
@@ -98,3 +111,10 @@ Impacto:
 - Hash do binario e registro de entrega.
 - Controle de acesso ao repositorio e 2FA.
 - Changelog por release.
+
+## Parametros e simbolo
+
+- Snapshot de parametros default:
+  - `docs/InsideBot_PARAMETROS_DEFAULT.md`
+- O bot nao e fixado em um unico ativo (ex.: `USDJPY`).
+- O ativo operado sempre e o simbolo do grafico (`_Symbol`).

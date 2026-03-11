@@ -70,7 +70,7 @@ Documentacao tecnica baseada no estado atual de `sliced/prime_botV2.mq5`.
 
 ### Canal e validacao
 
-- Canal com 4 velas a partir de `OpeningHour:OpeningMinute`.
+- Canal com `OpeningChannelBars` velas (padrao `4`) a partir de `OpeningHour:OpeningMinute`.
 - Base em `ChannelTimeframe`.
 - Fallback para M15 somente se:
   - `EnableM15Fallback = true`
@@ -181,6 +181,7 @@ Logs diarios de DD no Journal:
 - `FirstEntryMaxHour = 16`
 - `MaxEntryHour = 16`
 - `ChannelTimeframe = PERIOD_M5`
+- `OpeningChannelBars = 4`
 - `EnableM15Fallback = true`
 - `MinChannelRange = 2.5`
 - `MaxChannelRange = 14.99`

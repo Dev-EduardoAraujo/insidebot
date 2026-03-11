@@ -18,7 +18,7 @@ Objetivo: reduzir divergencia backtest vs live e evoluir observabilidade sem alt
 ## 1) Estado atual confirmado no codigo
 
 ### 1.1 Funcionalidades ativas
-- Canal de abertura com 4 velas e fallback M15 opcional.
+- Canal de abertura com numero de velas configuravel (`OpeningChannelBars`, padrao 4) e fallback M15 opcional.
 - Modo normal e modo sliced.
 - Entrada principal por RR com bloqueio de horario (`FirstEntryMaxHour`).
 - Controle de execucao por tipo de operacao:

@@ -6,24 +6,7 @@
   <title>InsideBot License Admin</title>
   <link rel="stylesheet" href="/admin/styles.css">
 </head>
-<body class="app-locked">
-  <div id="loginOverlay" class="overlay">
-    <div class="overlay-card">
-      <h2>Admin Login</h2>
-      <p class="muted">InsideBot License Control</p>
-      <label>
-        Username
-        <input id="overlayUser" type="text" value="admin" />
-      </label>
-      <label>
-        Password
-        <input id="overlayPass" type="password" />
-      </label>
-      <button id="overlayLoginBtn" class="btn btn-primary">Login</button>
-      <p id="overlayError" class="error-text"></p>
-    </div>
-  </div>
-
+<body>
   <header class="topbar">
     <div>
       <h1>InsideBot License Admin</h1>
@@ -222,6 +205,7 @@
               <th>Program</th>
               <th>Build</th>
               <th>IP</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="eventsBody"></tbody>
@@ -241,6 +225,7 @@
               <th>Denied Attempts</th>
               <th>Last Attempt</th>
               <th>Signal</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="suspiciousBody"></tbody>

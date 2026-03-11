@@ -5,12 +5,14 @@ Este documento fecha a etapa comercial de licenciamento do `InsideBot`.
 Referencia principal atualizada:
 
 - `docs/InsideBot_CONTROLE_DE_LICENCAS.md`
+- `docs/InsideBot_PARAMETROS_DEFAULT.md`
 
 ## 1. Objetivo
 
 O EA valida licenca via:
 
 - `POST https://insidebotcontrol.com.br/api/v1/license/validate`
+- `POST https://insidebotcontrol.com.br/api/v1/ops/ingest` (telemetria de operacoes fechadas)
 
 Com base na resposta, ele:
 
@@ -72,10 +74,22 @@ Endpoints:
 
 - `GET /api/v1/admin/licenses`
 - `GET /api/v1/admin/events`
+- `GET /api/v1/admin/trades`
 - `POST /api/v1/admin/license/upsert`
 - `POST /api/v1/admin/license/revoke`
 - `POST /api/v1/admin/license/extend`
 - `POST /api/v1/admin/license/delete`
+
+### 3.3 Telemetria de operacoes (EA -> servidor)
+
+`POST /api/v1/ops/ingest`
+
+Resumo:
+
+- chamado pelo `InsideBot` quando uma operacao e fechada
+- grava em `trade_events` no SQLite
+- inclui campos de PnL (`profit_net`, `profit_gross`, `swap`, `commission`, `fee`, `costs_total`)
+- inclui identificadores de operacao (`operation_code`, `operation_chain_code`) e contexto (first/turnof/pcm/adon)
 
 Painel web:
 
@@ -210,7 +224,11 @@ Checklist completo (GitHub -> VPS -> HTTPS -> Go-live):
 
 - `InsideBot` ja esta apontando por default para:
   - `LicenseServerBaseUrl = "https://insidebotcontrol.com.br"`
+- parametros default atualizados em:
+  - `docs/InsideBot_PARAMETROS_DEFAULT.md`
 - Em conta real, o cliente precisa liberar WebRequest no MT5 para o dominio.
 - Expiracao:
   - em `OnInit`: bloqueia com `INIT_FAILED`
   - em runtime: bloqueia no proximo ciclo de validacao (`LicenseCheckIntervalMinutes`)
+- Logs:
+  - `g_releaseInfoLogsEnabled` permanece forzado em `false` no `InsideBot` para nao expor logica da estrategia.

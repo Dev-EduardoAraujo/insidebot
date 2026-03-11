@@ -431,6 +431,45 @@ class LicenseStore:
             )
         return {"total": int(total), "items": items}
 
+    def delete_event(self, event_id):
+        try:
+            event_id_int = int(event_id)
+        except (TypeError, ValueError):
+            raise ValueError("id must be integer")
+        if event_id_int <= 0:
+            raise ValueError("id must be positive")
+
+        with self._write_lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM validation_events WHERE id = ?", (event_id_int,))
+            conn.commit()
+            deleted = int(cursor.rowcount or 0)
+
+        if deleted == 0:
+            raise ValueError("event not found")
+
+        return {"deleted": deleted, "id": event_id_int}
+
+    def delete_events_by_token(self, token: str, denied_only: bool = False):
+        token = str(token or "").strip()
+        if not token:
+            raise ValueError("token is required")
+
+        if denied_only:
+            sql = "DELETE FROM validation_events WHERE token = ? AND allowed = 0"
+        else:
+            sql = "DELETE FROM validation_events WHERE token = ?"
+
+        with self._write_lock, self._connect() as conn:
+            cursor = conn.execute(sql, (token,))
+            conn.commit()
+            deleted = int(cursor.rowcount or 0)
+
+        return {
+            "token": token,
+            "denied_only": bool(denied_only),
+            "deleted": deleted,
+        }
+
     def list_trade_events(self, limit=200, offset=0, token=None):
         limit = max(1, min(int(limit), 2000))
         offset = max(0, int(offset))
@@ -823,6 +862,11 @@ class LicenseHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _redirect(self, location: str, code: int = 302):
+        self.send_response(code)
+        self.send_header("Location", location)
+        self.end_headers()
+
     @staticmethod
     def _static_root_candidates():
         script_dir = Path(__file__).resolve().parent
@@ -846,10 +890,23 @@ class LicenseHandler(BaseHTTPRequestHandler):
         normalized = path.split("?", 1)[0]
         if normalized in {"/admin", "/admin/"}:
             target = static_root / "index.html"
+        elif normalized in {"/login", "/login/"}:
+            target = static_root / "login.html"
         elif normalized.startswith("/admin/"):
             relative = normalized[len("/admin/"):].lstrip("/")
             if not relative:
                 relative = "index.html"
+            target = (static_root / relative).resolve()
+            if relative.lower() == "index.html" and not self._has_admin_access():
+                self._redirect("/login")
+                return
+            if static_root.resolve() not in target.parents and target != static_root.resolve():
+                self._send_json(403, {"ok": False, "error": "forbidden"})
+                return
+        elif normalized.startswith("/login/"):
+            relative = normalized[len("/login/"):].lstrip("/")
+            if not relative:
+                relative = "login.html"
             target = (static_root / relative).resolve()
             if static_root.resolve() not in target.parents and target != static_root.resolve():
                 self._send_json(403, {"ok": False, "error": "forbidden"})
@@ -955,12 +1012,29 @@ class LicenseHandler(BaseHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
 
-        if path in {"/", "/admin", "/admin/"} or path.startswith("/admin/"):
-            if path == "/":
-                self.send_response(302)
-                self.send_header("Location", "/admin")
-                self.end_headers()
+        if path == "/":
+            self._redirect("/login")
+            return
+
+        if path in {"/login", "/login/"}:
+            if self._has_admin_access():
+                self._redirect("/admin")
                 return
+            self._serve_static(path)
+            return
+
+        if path.startswith("/login/"):
+            self._serve_static(path)
+            return
+
+        if path in {"/admin", "/admin/"}:
+            if not self._has_admin_access():
+                self._redirect("/login")
+                return
+            self._serve_static(path)
+            return
+
+        if path.startswith("/admin/"):
             self._serve_static(path)
             return
 
@@ -1138,6 +1212,31 @@ class LicenseHandler(BaseHTTPRequestHandler):
                 token = str(payload.get("token", "")).strip()
                 delete_events = parse_bool(payload.get("delete_events"), False)
                 result = self.server.store.delete_license(token, delete_events=delete_events)
+                self._send_json(200, {"ok": True, "result": result})
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+
+        if path == "/api/v1/admin/event/delete":
+            if not self._require_admin():
+                return
+            try:
+                payload = self._read_json()
+                event_id = payload.get("id")
+                result = self.server.store.delete_event(event_id)
+                self._send_json(200, {"ok": True, "result": result})
+            except ValueError as exc:
+                self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+
+        if path == "/api/v1/admin/events/delete":
+            if not self._require_admin():
+                return
+            try:
+                payload = self._read_json()
+                token = str(payload.get("token", "")).strip()
+                denied_only = parse_bool(payload.get("denied_only"), False)
+                result = self.server.store.delete_events_by_token(token, denied_only=denied_only)
                 self._send_json(200, {"ok": True, "result": result})
             except ValueError as exc:
                 self._send_json(400, {"ok": False, "error": str(exc)})

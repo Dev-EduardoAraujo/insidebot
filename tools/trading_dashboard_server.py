@@ -16,12 +16,34 @@ from datetime import datetime
 
 class ReportParser:
     """Parse markdown trading reports"""
+
+    @staticmethod
+    def _row_value(row, keys):
+        for key in keys:
+            if key in row and row.get(key) is not None:
+                value = str(row.get(key)).strip()
+                if value != '':
+                    return value
+        return ''
+
+    @staticmethod
+    def _build_markdown_table(headers, rows):
+        if not rows:
+            return ''
+        header_line = '| ' + ' | '.join(headers) + ' |'
+        align_line = '| ' + ' | '.join(['---'] * len(headers)) + ' |'
+        body_lines = []
+        for row in rows:
+            cells = [str(row.get(h, '')).replace('\n', ' ').strip() for h in headers]
+            body_lines.append('| ' + ' | '.join(cells) + ' |')
+        return '\n'.join([header_line, align_line] + body_lines)
     
     @staticmethod
     def parse_report(file_path):
         """Parse markdown report file"""
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
+        is_hiran1_report = re.search(r'##\s+Operacoes\s+Recontagem', content, re.IGNORECASE) is not None
 
         max_drawdown_value, max_drawdown_pct = ReportParser.extract_max_drawdown(content)
         first_ops_value = ReportParser.extract_value(content, r'First\s*\*\*(\d+)\*\*')
@@ -44,24 +66,51 @@ class ReportParser:
                 [r'## Operacoes com ADON', r'## Operacoes com AddOn'],
             ),
             'addon_only_ops': addon_only_section,
+            'first_tp_ops': ReportParser.extract_first_section_table(
+                content,
+                [r'## Operacoes First_op TP', r'## Operacoes TP'],
+            ),
+            'first_sl_ops': ReportParser.extract_first_section_table(
+                content,
+                [r'## Operacoes First_op SL', r'## Operacoes SL'],
+            ),
+            'first_be_ops': ReportParser.extract_first_section_table(
+                content,
+                [r'## Operacoes First_op BE'],
+            ),
             'tp_ops': ReportParser.extract_section_table(content, '## Operacoes TP'),
             'sl_ops': ReportParser.extract_section_table(content, '## Operacoes SL'),
+            'turnof_tp_ops': ReportParser.extract_first_section_table(
+                content,
+                [r'## Operacoes TurnOf TP', r'## Operacoes turnof TP'],
+            ),
+            'turnof_sl_ops': ReportParser.extract_first_section_table(
+                content,
+                [r'## Operacoes TurnOf SL', r'## Operacoes turnof SL'],
+            ),
+            'turnof_be_ops': ReportParser.extract_first_section_table(
+                content,
+                [r'## Operacoes TurnOf BE', r'## Operacoes turnof BE'],
+            ),
             'reversal_ops': ReportParser.extract_first_section_table(
                 content,
                 [r'## Operacoes TurnOf', r'## Operacoes turnof'],
             ),
-            'pcm_ops': ReportParser.extract_section_table(content, '## Operacoes PCM'),
+            'pcm_ops': ReportParser.extract_first_section_table(
+                content,
+                [r'## Operacoes PCM', r'## Operacoes Recontagem'],
+            ),
             'pcm_tp_ops': ReportParser.extract_first_section_table(
                 content,
-                [r'## Operacoes PCM TP', r'## Operacoes PCM - TP'],
+                [r'## Operacoes PCM TP', r'## Operacoes PCM - TP', r'## Operacoes Recontagem TP', r'## Operacoes Recontagem - TP'],
             ),
             'pcm_sl_ops': ReportParser.extract_first_section_table(
                 content,
-                [r'## Operacoes PCM SL', r'## Operacoes PCM - SL'],
+                [r'## Operacoes PCM SL', r'## Operacoes PCM - SL', r'## Operacoes Recontagem SL', r'## Operacoes Recontagem - SL'],
             ),
             'pcm_be_ops': ReportParser.extract_first_section_table(
                 content,
-                [r'## Operacoes PCM BE', r'## Operacoes PCM - BE'],
+                [r'## Operacoes PCM BE', r'## Operacoes PCM - BE', r'## Operacoes Recontagem BE', r'## Operacoes Recontagem - BE'],
             ),
         }
         no_trade_summary = ReportParser.parse_no_trade_summary(content)
@@ -78,6 +127,7 @@ class ReportParser:
         entry_type_analysis = ReportParser.build_entry_type_analysis(detailed_core_rows) if detailed_core_rows else ReportParser.parse_entry_type_table(content)
         timeframe_analysis = ReportParser.build_timeframe_analysis(detailed_core_rows) if detailed_core_rows else ReportParser.parse_timeframe_table(content)
         weekday_analysis = ReportParser.build_weekday_analysis(detailed_core_rows) if detailed_core_rows else ReportParser.parse_weekday_table(content)
+        weekday_flag_analysis = ReportParser.build_weekday_flag_analysis(detailed_core_rows) if detailed_core_rows else []
         entry_hour_analysis = ReportParser.build_entry_hour_analysis(detailed_core_rows) if detailed_core_rows else ReportParser.parse_entry_hour_table(content)
         operation_card_sections = ReportParser.build_operations_card_sections(detailed_core_rows)
 
@@ -90,7 +140,13 @@ class ReportParser:
         turn_ops_count = ReportParser.parse_int(turn_ops_value)
 
         addon_only_stats = ReportParser.parse_section_trade_stats(section_tables.get('addon_only_ops'))
-        reversal_stats = ReportParser.parse_section_trade_stats(section_tables.get('reversal_ops'))
+        turnof_tp_stats = ReportParser.parse_section_trade_stats(section_tables.get('turnof_tp_ops'))
+        turnof_sl_stats = ReportParser.parse_section_trade_stats(section_tables.get('turnof_sl_ops'))
+        turnof_be_stats = ReportParser.parse_section_trade_stats(section_tables.get('turnof_be_ops'))
+        if (turnof_tp_stats['total'] + turnof_sl_stats['total'] + turnof_be_stats['total']) > 0:
+            reversal_stats = ReportParser.merge_trade_stats([turnof_tp_stats, turnof_sl_stats, turnof_be_stats])
+        else:
+            reversal_stats = ReportParser.parse_section_trade_stats(section_tables.get('reversal_ops'))
         pcm_tp_stats = ReportParser.parse_section_trade_stats(section_tables.get('pcm_tp_ops'))
         pcm_sl_stats = ReportParser.parse_section_trade_stats(section_tables.get('pcm_sl_ops'))
         pcm_be_stats = ReportParser.parse_section_trade_stats(section_tables.get('pcm_be_ops'))
@@ -216,13 +272,15 @@ class ReportParser:
             'timeframe_analysis': timeframe_analysis,
             'flags_analysis': ReportParser.parse_flags_table(content),
             'weekday_analysis': weekday_analysis,
+            'weekday_flag_analysis': weekday_flag_analysis,
             'entry_hour_analysis': entry_hour_analysis,
             'top_trades': ReportParser.parse_top_trades(content, True),
             'worst_trades': ReportParser.parse_top_trades(content, False),
             'dd_tick_daily': dd_tick_daily,
             'dd_open_daily': dd_open_daily,
             'section_tables': section_tables,
-            'no_trade_summary': no_trade_summary
+            'no_trade_summary': no_trade_summary,
+            'secondary_op_label': 'Recontagem'
         }
         
         return data
@@ -1026,6 +1084,40 @@ class ReportParser:
         return result
 
     @staticmethod
+    def build_weekday_flag_analysis(rows):
+        """Build weekday analysis segmented by flag (First_op / TurnOf)."""
+        weekday_labels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom']
+        grouped = {label: [] for label in weekday_labels}
+
+        for row in rows or []:
+            entry_dt = row.get('_entry_dt') or ReportParser.parse_datetime_value(row.get('Entry Time')) or ReportParser.parse_datetime_value(row.get('Date'))
+            if entry_dt is None:
+                continue
+            weekday_idx = entry_dt.weekday()  # Monday=0
+            grouped[weekday_labels[weekday_idx]].append(row)
+
+        result = []
+        for label in weekday_labels:
+            day_rows = grouped[label]
+            first_rows = [r for r in day_rows if bool(r.get('_first_flag'))]
+            turn_rows = [r for r in day_rows if bool(r.get('_turn_flag'))]
+
+            for flag_name, flag_rows in (('First_op', first_rows), ('TurnOf', turn_rows)):
+                summary = ReportParser.summarize_group(flag_rows)
+                result.append({
+                    'weekday': label,
+                    'flag': flag_name,
+                    'trades': summary['trades'],
+                    'tp': summary['tp'],
+                    'sl': summary['sl'],
+                    'win_rate': summary['win_rate'],
+                    'net_profit': summary['net_profit'],
+                    'profit_factor': summary['profit_factor'],
+                })
+
+        return result
+
+    @staticmethod
     def build_entry_hour_analysis(rows):
         """Build entry-hour analysis from core rows."""
         grouped = {}
@@ -1562,7 +1654,7 @@ class ReportParser:
     @staticmethod
     def extract_section_table(content, section_title):
         """Extract complete section markdown table"""
-        section = re.search(f'{section_title}(.*?)(?=##|$)', content, re.DOTALL)
+        section = re.search(f'{section_title}(.*?)(?=##|$)', content, re.DOTALL | re.IGNORECASE)
         if not section:
             return None
         
@@ -1657,6 +1749,42 @@ class ReportParser:
             if 'Limit cancelada' in motivo:
                 limit_canceled += dias_int
 
+        # First_op nao ativada: eventos de LIMIT cancelada/não enviada antes da execucao.
+        first_op_not_activated_rows = []
+        for row in details_rows:
+            reason = (ReportParser._row_value(row, ['Reason', 'Motivo'])).lower()
+            event_type = (ReportParser._row_value(row, ['Event Type', 'Evento', 'EventType'])).upper()
+
+            is_limit_not_activated = False
+            if event_type:
+                if event_type.startswith('LIMIT_') and ('CANCELED' in event_type or 'SKIPPED' in event_type or 'RETRY' in event_type):
+                    is_limit_not_activated = True
+            if not is_limit_not_activated:
+                if ('limit cancelada' in reason or
+                        'limit nao enviada' in reason or
+                        'retry limit cancelada' in reason or
+                        reason.startswith('limit ')):
+                    is_limit_not_activated = True
+
+            if not is_limit_not_activated:
+                continue
+
+            first_op_not_activated_rows.append({
+                '#': str(len(first_op_not_activated_rows) + 1),
+                'Date': ReportParser._row_value(row, ['Date', 'Data']) or '-',
+                'Channel Range': ReportParser._row_value(row, ['Channel Range', 'Range do Canal']) or '-',
+                'Timeframe': ReportParser._row_value(row, ['Timeframe']) or '-',
+                'Faltou LIMIT (pts)': ReportParser._row_value(row, ['Faltou LIMIT (pts)', 'Missing LIMIT (pts)']) or '-',
+                'RR Max': ReportParser._row_value(row, ['RR Max']) or '-',
+                'RR Min': ReportParser._row_value(row, ['RR Min']) or '-',
+            })
+
+        first_op_not_activated_headers = ['#', 'Date', 'Channel Range', 'Timeframe', 'Faltou LIMIT (pts)', 'RR Max', 'RR Min']
+        first_op_not_activated_table = ReportParser._build_markdown_table(
+            first_op_not_activated_headers,
+            first_op_not_activated_rows
+        )
+
         return {
             'total': total,
             'limit_canceled': str(limit_canceled),
@@ -1664,7 +1792,9 @@ class ReportParser:
             'source_path': source_path,
             'reason_table': reasons_table,
             'details_table': details_table,
-            'details_count': str(len(details_rows))
+            'details_count': str(len(details_rows)),
+            'first_op_not_activated_count': str(len(first_op_not_activated_rows)),
+            'first_op_not_activated_table': first_op_not_activated_table
         }
 
 

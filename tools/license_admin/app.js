@@ -49,19 +49,9 @@ function updateAuthState() {
   $("authState").value = token ? `Authenticated (${user || "admin"})` : "Not authenticated";
 }
 
-function setOverlayVisible(visible) {
-  const overlay = $("loginOverlay");
-  if (visible) {
-    overlay.classList.remove("hidden");
-    document.body.classList.add("app-locked");
-  } else {
-    overlay.classList.add("hidden");
-    document.body.classList.remove("app-locked");
-  }
-}
-
-function setOverlayError(message) {
-  $("overlayError").textContent = message || "";
+function redirectToLogin(reason = "") {
+  const query = reason ? `?reason=${encodeURIComponent(reason)}` : "";
+  window.location.replace(`/login${query}`);
 }
 
 function parseMs(value) {
@@ -83,6 +73,15 @@ function esc(text) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function decodeUriComponentSafe(value) {
+  const raw = String(value || "");
+  try {
+    return decodeURIComponent(raw);
+  } catch (_) {
+    return raw;
+  }
 }
 
 function tag(text, cls) {
@@ -194,32 +193,6 @@ async function testConnection() {
   }
 }
 
-async function login(username, password) {
-  const user = (username || "").trim() || "admin";
-  const pass = (password || "").trim();
-  if (!pass) throw new Error("Password is required");
-
-  let data = null;
-  try {
-    data = await apiPost("/api/v1/admin/auth/login", { username: user, password: pass }, false);
-  } catch (err) {
-    // Retry once with default requested credentials to bypass browser input quirks.
-    if (String(err.message || "").toLowerCase().includes("invalid_credentials")) {
-      data = await apiPost(
-        "/api/v1/admin/auth/login",
-        { username: "admin", password: "F82615225b" },
-        false
-      );
-    } else {
-      throw err;
-    }
-  }
-
-  setAuth(data.token || "", data.username || username);
-  $("overlayPass").value = "";
-  toast(`Authenticated as ${data.username || username}`);
-}
-
 async function logout() {
   try {
     await apiPost("/api/v1/admin/auth/logout", {}, true);
@@ -231,14 +204,17 @@ async function logout() {
 }
 
 async function checkAuth() {
-  if (!getAuthToken()) return false;
+  if (!getAuthToken()) {
+    redirectToLogin("missing_session");
+    return false;
+  }
   try {
     await apiGet("/api/v1/admin/auth/check", true);
     updateAuthState();
     return true;
-  } catch (err) {
+  } catch (_) {
     setAuth("", "");
-    toast(`Session expired: ${err.message}`);
+    redirectToLogin("session_expired");
     return false;
   }
 }
@@ -424,12 +400,15 @@ function renderEvents() {
   const body = $("eventsBody");
   const events = getEventsFiltered();
   if (!events.length) {
-    body.innerHTML = `<tr><td colspan="9">No events found.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10">No events found.</td></tr>`;
     return;
   }
 
   body.innerHTML = events.map((event) => {
     const st = event.allowed ? tag(event.status || "VALID", "tag-ok") : tag(event.status || "DENIED", "tag-bad");
+    const token = String(event.token || "").trim();
+    const tokenEncoded = encodeURIComponent(token);
+    const eventId = Number(event.id || 0);
     return `
       <tr>
         <td>${esc(formatDate(event.event_time))}</td>
@@ -441,6 +420,19 @@ function renderEvents() {
         <td>${esc(event.program || "-")}</td>
         <td>${esc(event.build || "-")}</td>
         <td>${esc(event.remote_ip || "-")}</td>
+        <td>
+          <details class="action-dropdown">
+            <summary>Actions</summary>
+            <div class="action-menu">
+              <button class="btn btn-danger btn-sm" data-action="deleteEvent" data-event-id="${eventId}">
+                Delete record
+              </button>
+              <button class="btn btn-sm" data-action="filterEventToken" data-token="${tokenEncoded}">
+                Filter token
+              </button>
+            </div>
+          </details>
+        </td>
       </tr>
     `;
   }).join("");
@@ -450,7 +442,7 @@ function renderSuspicious() {
   const body = $("suspiciousBody");
   const suspicious = computeSuspicious(state.events);
   if (!suspicious.length) {
-    body.innerHTML = `<tr><td colspan="6">No suspicious attempts in loaded events.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7">No suspicious attempts in loaded events.</td></tr>`;
     return;
   }
   body.innerHTML = suspicious.map((item) => `
@@ -461,6 +453,22 @@ function renderSuspicious() {
       <td>${esc(item.denied)}</td>
       <td>${esc(formatDate(item.lastTime))}</td>
       <td>${tag(item.signal, "tag-warn")}</td>
+      <td>
+        <details class="action-dropdown">
+          <summary>Actions</summary>
+          <div class="action-menu">
+            <button class="btn btn-danger btn-sm" data-action="deleteSuspiciousDenied" data-token="${encodeURIComponent(item.token || "")}">
+              Delete denied
+            </button>
+            <button class="btn btn-danger btn-sm" data-action="deleteSuspiciousAll" data-token="${encodeURIComponent(item.token || "")}">
+              Delete all attempts
+            </button>
+            <button class="btn btn-sm" data-action="filterSuspiciousToken" data-token="${encodeURIComponent(item.token || "")}">
+              Filter token
+            </button>
+          </div>
+        </details>
+      </td>
     </tr>
   `).join("");
 }
@@ -527,6 +535,39 @@ async function loadTokenEvents(token) {
   const data = await apiGet(`/api/v1/admin/events?${query.toString()}`);
   state.tokenEventsCache[token] = data.items || [];
   return state.tokenEventsCache[token];
+}
+
+async function deleteActivationEvent(eventId) {
+  const eventIdInt = Number(eventId || 0);
+  if (!Number.isInteger(eventIdInt) || eventIdInt <= 0) {
+    throw new Error("Invalid event id");
+  }
+
+  const ok = confirm(`Delete activation attempt #${eventIdInt}?`);
+  if (!ok) return;
+
+  const data = await apiPost("/api/v1/admin/event/delete", { id: eventIdInt });
+  const deleted = Number(data?.result?.deleted || 0);
+  toast(`Deleted ${deleted} record(s)`);
+  await loadEvents();
+}
+
+async function deleteActivationEventsByToken(token, deniedOnly = false) {
+  const safeToken = String(token || "").trim();
+  if (!safeToken) throw new Error("Invalid token");
+
+  const label = deniedOnly ? "denied attempts only" : "all attempts for this token";
+  const ok = confirm(`Delete ${label}?\nToken: ${safeToken}`);
+  if (!ok) return;
+
+  const data = await apiPost("/api/v1/admin/events/delete", {
+    token: safeToken,
+    denied_only: !!deniedOnly,
+  });
+  delete state.tokenEventsCache[safeToken];
+  const deleted = Number(data?.result?.deleted || 0);
+  toast(`Deleted ${deleted} activation attempt(s)`);
+  await loadEvents();
 }
 
 async function saveLicense() {
@@ -618,52 +659,52 @@ async function refreshAll() {
   await loadEvents();
 }
 
+function setupCardDropdowns() {
+  const cards = Array.from(document.querySelectorAll("main.layout > section.card"));
+  cards.forEach((card) => {
+    if (card.dataset.dropdownReady === "1") return;
+    const title = card.querySelector(":scope > h2");
+    if (!title) return;
+
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "card-collapse-btn";
+    toggle.innerHTML = `<span class="card-collapse-label">Collapse</span><span class="card-collapse-icon">▾</span>`;
+    toggle.setAttribute("aria-expanded", "true");
+
+    head.appendChild(title);
+    head.appendChild(toggle);
+    card.insertBefore(head, card.firstChild);
+
+    const body = document.createElement("div");
+    body.className = "card-body";
+    while (head.nextSibling) {
+      body.appendChild(head.nextSibling);
+    }
+    card.appendChild(body);
+
+    toggle.addEventListener("click", () => {
+      const collapsed = card.classList.toggle("card-collapsed");
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      const label = toggle.querySelector(".card-collapse-label");
+      if (label) label.textContent = collapsed ? "Expand" : "Collapse";
+    });
+
+    card.dataset.dropdownReady = "1";
+  });
+}
+
 function bindEvents() {
   $("saveConnBtn").addEventListener("click", () => {
     localStorage.setItem(STORAGE_BASE_URL, getBaseUrl());
     toast("Connection settings saved");
   });
 
-  $("overlayLoginBtn").addEventListener("click", async () => {
-    const username = $("overlayUser").value.trim();
-    const password = $("overlayPass").value.trim();
-    try {
-      await login(username, password);
-      setOverlayError("");
-      setOverlayVisible(false);
-      await refreshAll();
-    } catch (err) {
-      setOverlayError(`Login failed: ${err.message || "unknown_error"} (user=${username || "admin"})`);
-      toast(err.message);
-    }
-  });
-
-  $("overlayPass").addEventListener("keydown", async (event) => {
-    if (event.key !== "Enter") return;
-    const username = $("overlayUser").value.trim();
-    const password = $("overlayPass").value.trim();
-    try {
-      await login(username, password);
-      setOverlayError("");
-      setOverlayVisible(false);
-      await refreshAll();
-    } catch (err) {
-      setOverlayError(`Login failed: ${err.message || "unknown_error"} (user=${username || "admin"})`);
-      toast(err.message);
-    }
-  });
-
   $("logoutBtn").addEventListener("click", async () => {
     await logout();
-    state.licenses = [];
-    state.events = [];
-    state.tokenEventsCache = {};
-    renderAllLicenses();
-    renderActiveLicenses();
-    renderEvents();
-    renderSuspicious();
-    renderStats();
-    setOverlayVisible(true);
+    redirectToLogin("logged_out");
   });
 
   $("testConnBtn").addEventListener("click", async () => {
@@ -764,34 +805,66 @@ function bindEvents() {
       box.textContent = `Error: ${err.message}`;
     }
   }, true);
+
+  $("eventsBody").addEventListener("click", async (event) => {
+    const btn = event.target.closest("button[data-action]");
+    if (!btn) return;
+    const action = btn.getAttribute("data-action");
+    const token = decodeUriComponentSafe(btn.getAttribute("data-token") || "");
+    const eventId = btn.getAttribute("data-event-id");
+
+    try {
+      if (action === "deleteEvent") {
+        await deleteActivationEvent(eventId);
+      } else if (action === "filterEventToken") {
+        $("eventsFilterToken").value = token;
+        await loadEvents();
+      }
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $("suspiciousBody").addEventListener("click", async (event) => {
+    const btn = event.target.closest("button[data-action]");
+    if (!btn) return;
+    const action = btn.getAttribute("data-action");
+    const token = decodeUriComponentSafe(btn.getAttribute("data-token") || "");
+
+    try {
+      if (action === "deleteSuspiciousDenied") {
+        await deleteActivationEventsByToken(token, true);
+      } else if (action === "deleteSuspiciousAll") {
+        await deleteActivationEventsByToken(token, false);
+      } else if (action === "filterSuspiciousToken") {
+        $("eventsFilterToken").value = token;
+        await loadEvents();
+      }
+    } catch (err) {
+      toast(err.message);
+    }
+  });
 }
 
 function loadSavedConnection() {
   $("baseUrl").value = localStorage.getItem(STORAGE_BASE_URL) || window.location.origin;
-  $("overlayUser").value = getAuthUser() || "admin";
   updateAuthState();
 }
 
 async function init() {
   loadSavedConnection();
+  setupCardDropdowns();
   bindEvents();
   await testConnection();
   const authenticated = await checkAuth();
-  if (authenticated) {
-    setOverlayVisible(false);
-    try {
-      await loadLicenses();
-      await loadEvents();
-    } catch (err) {
-      toast(err.message);
-    }
-  } else {
-    setOverlayVisible(true);
-    renderAllLicenses();
-    renderActiveLicenses();
-    renderEvents();
-    renderSuspicious();
-    renderStats();
+  if (!authenticated) {
+    return;
+  }
+  try {
+    await loadLicenses();
+    await loadEvents();
+  } catch (err) {
+    toast(err.message);
   }
 }
 

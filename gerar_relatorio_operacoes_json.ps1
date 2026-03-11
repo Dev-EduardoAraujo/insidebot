@@ -10,6 +10,9 @@ $ErrorActionPreference = "Stop"
 $invariant = [System.Globalization.CultureInfo]::InvariantCulture
 $emojiTrue = [string][char]0x2705
 $emojiFalse = [string][char]0x274C
+$script:IsHiran1Mode = $false
+$script:SecondaryOpLabel = "PCM"
+$script:SecondaryOpPrefix = "pcm_"
 
 function Is-True {
    param([object]$Value)
@@ -40,6 +43,10 @@ function Resolve-NoTradePCMArmedFlag {
    if ($null -eq $Row) { return $false }
 
    $rawArmed = Is-True $Row.pcm_armed_from_notrade
+   if (-not $rawArmed) { $rawArmed = Is-True $Row.recontagem_armed_from_notrade }
+   if (-not $rawArmed) { $rawArmed = Is-True $Row.Recontagem_armed_from_notrade }
+   if (-not $rawArmed) { $rawArmed = Is-True $Row.second_op_armed_from_notrade }
+   if (-not $rawArmed) { $rawArmed = Is-True $Row.Second_op_armed_from_notrade }
    if ($rawArmed) { return $true }
 
    $eventType = [string]$Row.event_type
@@ -821,14 +828,37 @@ function Get-RunParamDisplayName {
       "SlicedMultiplier" { return "SLDMultiplier" }
       "BreakoutMinTolerancePoints" { return "Tolerancia minima de rompimento (pontos)" }
       "PCMRiskPercent" { return "Risco por operacao PCM (%)" }
+      "RecontagemRiskPercent" { return "Risco por operacao Recontagem (%)" }
       "EnablePCMOnNoTradeLimitTarget" { return "Habilitar PCM em NoTrade por LIMIT no alvo" }
+      "EnableRecontagemOnNoTradeLimitTarget" { return "Habilitar Recontagem em NoTrade por LIMIT no alvo" }
+      "EnableSecond_op" { return "Habilitar Recontagem pos TP da first_op" }
+      "EnableSecondOp" { return "Habilitar Recontagem pos TP da first_op" }
+      "EnableRecontagem" { return "Habilitar Recontagem pos TP da first_op" }
+      "EnableSecond_opOnNoTradeLimitTarget" { return "Habilitar Recontagem em NoTrade por LIMIT no alvo" }
+      "EnableSecondOpOnNoTradeLimitTarget" { return "Habilitar Recontagem em NoTrade por LIMIT no alvo" }
+      "EnableSecondOpOnFirstOpStopLoss" { return "Habilitar Recontagem por SL da first_op" }
+      "EnableSecond_opOnFirstOpStopLoss" { return "Habilitar Recontagem por SL da first_op" }
+      "EnableRecontagemOnFirstOpStopLoss" { return "Habilitar Recontagem por SL da first_op" }
       "BreakEven" { return "Break even" }
       "PCMBreakEven" { return "Break even" }
       "PCMBreakEvenTriggerPercent" { return "Gatilho Break even PCM (% da distancia ate TP)" }
+      "RecontagemBreakEvenTriggerPercent" { return "Gatilho Break even Recontagem (% da distancia ate TP)" }
       "TraillingStop" { return "Trailling stop" }
       "TrailingStop" { return "Trailling stop" }
       "PCMTPReductionPercent" { return "Reducao TP PCM (%)" }
+      "RecontagemTPReductionPercent" { return "Reducao TP Recontagem (%)" }
       "PCMNegativeAddTPDistancePercent" { return "Distancia TP apos ADON em PCM (% da dist. ate SL)" }
+      "RecontagemNegativeAddTPDistancePercent" { return "Distancia TP apos ADON em Recontagem (% da dist. ate SL)" }
+      "RecontagemChannelBars" { return "RecontagemChannelBars" }
+      "RecontagemMaxNoTradeRecounts" { return "Maximo de recontagens por NoTrade" }
+      "RecontagemMaxOperationsPerDay" { return "RecontagemMaxOperationsPerDay" }
+      "RecontagemIgnoreFirstEntryMaxHour" { return "RecontagemIgnoreFirstEntryMaxHour" }
+      "RecontagemReferenceTimeframe" { return "RecontagemReferenceTimeframe" }
+      "RecontagemEnableSkipLargeCandle" { return "RecontagemEnableSkipLargeCandle" }
+      "RecontagemMaxCandlePoints" { return "RecontagemMaxCandlePoints" }
+      "EnableRecontagemHourLimit" { return "EnableRecontagemHourLimit" }
+      "RecontagemEntryMaxHour" { return "RecontagemEntryMaxHour" }
+      "RecontagemEntryMaxMinute" { return "RecontagemEntryMaxMinute" }
       "UseInitialDepositForRisk" { return "Usar deposito inicial da conta como base fixa do risco" }
       "FixedLotAllEntries" { return "Lote fixo para todas as entradas (0 desativa)" }
       "DrawdownPercentReference" { return "Referencia DD percentual" }
@@ -841,7 +871,8 @@ function Get-RunParamDisplayName {
 function Append-RunConfigSection {
    param(
       [System.Text.StringBuilder]$Builder,
-      [object]$RunConfig
+      [object]$RunConfig,
+      [bool]$IsHiran1Mode = $false
    )
 
    [void]$Builder.AppendLine("## Parametros do Bot")
@@ -859,6 +890,7 @@ function Append-RunConfigSection {
    [void]$Builder.AppendLine("")
 
    $selected = $RunConfig.selected_parameters
+   $secondaryTitle = if ($IsHiran1Mode) { "Parametros de Recontagem" } else { "Parametros de PCM" }
    $groupDefinitions = @(
       [pscustomobject]@{
          title = "Parametros de Gatilho e Canal"
@@ -897,8 +929,28 @@ function Append-RunConfigSection {
          names = @("EnableNegativeAddOn", "NegativeAddMaxEntries", "NegativeAddTriggerPercent", "NegativeAddLotMultiplier", "NegativeAddUseSameSLTP", "EnableNegativeAddTPAdjustment", "NegativeAddTPDistancePercent", "NegativeAddTPAdjustOnReversal", "EnableNegativeAddDebugLogs", "NegativeAddDebugIntervalSeconds")
       },
       [pscustomobject]@{
-         title = "Parametros de PCM"
-         names = @("EnablePCM", "EnablePCMOnNoTradeLimitTarget", "BreakEven", "PCMBreakEven", "PCMBreakEvenTriggerPercent", "TraillingStop", "TrailingStop", "PCMTPReductionPercent", "PCMRiskPercent", "PCMNegativeAddTPDistancePercent", "PCMChannelBars", "PCMMaxOperationsPerDay", "PCMIgnoreFirstEntryMaxHour", "PCMReferenceTimeframe", "PCMEnableSkipLargeCandle", "PCMMaxCandlePoints", "EnablePCMHourLimit", "PCMEntryMaxHour", "PCMEntryMaxMinute")
+         title = $secondaryTitle
+         names = @(
+            "EnablePCM", "EnableSecondOp", "EnableSecond_op", "EnableRecontagem",
+            "EnablePCMOnNoTradeLimitTarget", "EnableSecondOpOnNoTradeLimitTarget", "EnableSecond_opOnNoTradeLimitTarget", "EnableRecontagemOnNoTradeLimitTarget",
+            "EnableSecondOpOnFirstOpStopLoss", "EnableSecond_opOnFirstOpStopLoss", "EnableRecontagemOnFirstOpStopLoss",
+            "BreakEven", "PCMBreakEven",
+            "PCMBreakEvenTriggerPercent", "RecontagemBreakEvenTriggerPercent",
+            "TraillingStop", "TrailingStop",
+            "PCMTPReductionPercent", "RecontagemTPReductionPercent",
+            "PCMRiskPercent", "RecontagemRiskPercent",
+            "PCMNegativeAddTPDistancePercent", "RecontagemNegativeAddTPDistancePercent",
+            "PCMChannelBars", "RecontagemChannelBars",
+            "PCMMaxNoTradeRecounts", "RecontagemMaxNoTradeRecounts",
+            "PCMMaxOperationsPerDay", "RecontagemMaxOperationsPerDay",
+            "PCMIgnoreFirstEntryMaxHour", "RecontagemIgnoreFirstEntryMaxHour",
+            "PCMReferenceTimeframe", "RecontagemReferenceTimeframe",
+            "PCMEnableSkipLargeCandle", "RecontagemEnableSkipLargeCandle",
+            "PCMMaxCandlePoints", "RecontagemMaxCandlePoints",
+            "EnablePCMHourLimit", "EnableRecontagemHourLimit",
+            "PCMEntryMaxHour", "RecontagemEntryMaxHour",
+            "PCMEntryMaxMinute", "RecontagemEntryMaxMinute"
+         )
       },
       [pscustomobject]@{
          title = "Parametros de Interface e Log"
@@ -1085,7 +1137,8 @@ function Append-NoTrades-Section {
    param(
       [System.Text.StringBuilder]$Builder,
       [string]$SourcePath,
-      [array]$NoTradeRows
+      [array]$NoTradeRows,
+      [string]$SecondaryOpLabel = "PCM"
    )
 
    $rows = @($NoTradeRows)
@@ -1101,10 +1154,12 @@ function Append-NoTrades-Section {
       }
    )
    [void]$Builder.AppendLine("- Dias com LIMIT cancelada antes do fill: **$($limitCanceledRows.Count)**")
-   $pcmArmedRows = @(
-      $limitCanceledRows | Where-Object { Is-True $_.pcm_armed_from_notrade }
+   $secondaryArmedRows = @(
+      $limitCanceledRows | Where-Object {
+         Resolve-NoTradePCMArmedFlag -Row $_ -EnablePCMOnNoTrade $false -PCMRuntimeLikelyEnabled $false
+      }
    )
-   [void]$Builder.AppendLine("- LIMIT cancelada com PCM armada por NoTrade: **$($pcmArmedRows.Count)**")
+   [void]$Builder.AppendLine("- LIMIT cancelada com $SecondaryOpLabel armada por NoTrade: **$($secondaryArmedRows.Count)**")
 
    $limitCanceledWithMetrics = @(
       $limitCanceledRows | Where-Object {
@@ -1162,14 +1217,15 @@ function Append-NoTrades-Section {
 
    [void]$Builder.AppendLine("### Detalhes de Dias sem Operacao")
    [void]$Builder.AppendLine("")
-   [void]$Builder.AppendLine("| # | Date | Reason | Channel Range | Timeframe | Faltou LIMIT (pts) | RR Max | RR Min | PCM armada por NoTrade |")
+   [void]$Builder.AppendLine("| # | Date | Reason | Channel Range | Timeframe | Faltou LIMIT (pts) | RR Max | RR Min | $SecondaryOpLabel armada por NoTrade |")
    [void]$Builder.AppendLine("|---:|---|---|---:|---|---:|---:|---:|---|")
    for ($i = 0; $i -lt $rows.Count; $i++) {
       $r = $rows[$i]
       $eventType = [string]$r.event_type
       $reasonText = [string]$r.reason
       $isLimitCanceledTarget = ($eventType -eq "LIMIT_CANCELED_TARGET_REACHED") -or ($reasonText -like "Limit cancelada*")
-      $pcmArmedLabel = if (-not $isLimitCanceledTarget) { "-" } elseif (Is-True $r.pcm_armed_from_notrade) { $emojiTrue } else { $emojiFalse }
+      $secondaryArmed = Resolve-NoTradePCMArmedFlag -Row $r -EnablePCMOnNoTrade $false -PCMRuntimeLikelyEnabled $false
+      $pcmArmedLabel = if (-not $isLimitCanceledTarget) { "-" } elseif ($secondaryArmed) { $emojiTrue } else { $emojiFalse }
       $line = "| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} |" -f `
          ($i + 1), `
          [string]$r.date, `
@@ -1307,8 +1363,8 @@ function Append-Trade-Table {
       [pscustomobject]@{ Name = "SLD"; Numeric = $true },
       [pscustomobject]@{ Name = "TurnOf"; Numeric = $true },
       [pscustomobject]@{ Name = "Triggered TurnOf"; Numeric = $true },
-      [pscustomobject]@{ Name = "PCM BE"; Numeric = $true },
-      [pscustomobject]@{ Name = "PCM Trail"; Numeric = $true },
+      [pscustomobject]@{ Name = ($script:SecondaryOpLabel + " BE"); Numeric = $true },
+      [pscustomobject]@{ Name = ($script:SecondaryOpLabel + " Trail"); Numeric = $true },
       [pscustomobject]@{ Name = "Op Chain"; Numeric = $false },
       [pscustomobject]@{ Name = "Op Code"; Numeric = $false },
       [pscustomobject]@{ Name = "First Op"; Numeric = $true },
@@ -1409,17 +1465,77 @@ $data = Get-Content -LiteralPath $JsonPath -Raw | ConvertFrom-Json
 $rawTrades = @($data.trades)
 $runConfig = $data.run_config
 $tickDrawdownData = $data.tick_drawdown
-$enablePCMOnNoTradeLimitTargetConfig = Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnablePCMOnNoTradeLimitTarget" -DefaultValue $false
-$enablePCMConfig = Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnablePCM" -DefaultValue $false
-$pcmChannelBarsConfig = [int](To-Double (Get-RunParamValue -RunConfig $runConfig -Name "PCMChannelBars" -DefaultValue 0))
-$pcmMaxOperationsPerDayConfig = [int](To-Double (Get-RunParamValue -RunConfig $runConfig -Name "PCMMaxOperationsPerDay" -DefaultValue 0))
-$pcmReferenceTimeframeConfig = [string](Get-RunParamRawValue -RunConfig $runConfig -Name "PCMReferenceTimeframe" -DefaultValue "")
-$pcmRuntimeLikelyEnabledConfig = (
-   $enablePCMConfig -and
-   ($pcmChannelBarsConfig -ge 4) -and
-   ($pcmMaxOperationsPerDayConfig -gt 0) -and
-   ($pcmReferenceTimeframeConfig -in @("PERIOD_M1", "PERIOD_M5", "PERIOD_M15"))
-)
+$jsonFileName = [System.IO.Path]::GetFileName($JsonPath)
+$script:IsHiran1Mode = ($jsonFileName.ToLowerInvariant().StartsWith("hiran1_"))
+if (-not $script:IsHiran1Mode -and $null -ne $runConfig -and $null -ne $runConfig.selected_parameters) {
+   $script:IsHiran1Mode = ($null -ne $runConfig.selected_parameters.PSObject.Properties["EnableRecontagem"])
+}
+$script:SecondaryOpLabel = if ($script:IsHiran1Mode) { "Recontagem" } else { "PCM" }
+$script:SecondaryOpPrefix = if ($script:IsHiran1Mode) { "recontagem_" } else { "pcm_" }
+
+$enableSecondaryOnNoTradeLimitTargetConfig = if ($script:IsHiran1Mode) {
+   Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnableRecontagemOnNoTradeLimitTarget" -DefaultValue $false
+} else {
+   Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnablePCMOnNoTradeLimitTarget" -DefaultValue $false
+}
+if (-not $enableSecondaryOnNoTradeLimitTargetConfig) {
+   $enableSecondaryOnNoTradeLimitTargetConfig = Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnableSecond_opOnNoTradeLimitTarget" -DefaultValue $false
+}
+
+$enableSecondaryConfig = if ($script:IsHiran1Mode) {
+   Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnableRecontagem" -DefaultValue $false
+} else {
+   Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnablePCM" -DefaultValue $false
+}
+if (-not $enableSecondaryConfig) {
+   $enableSecondaryConfig = Get-RunParamBoolValue -SelectedParams $runConfig.selected_parameters -Name "EnableSecond_op" -DefaultValue $false
+}
+
+$secondaryChannelBarsRaw = if ($script:IsHiran1Mode) {
+   Get-RunParamValue -RunConfig $runConfig -Name "RecontagemChannelBars" -DefaultValue 0
+} else {
+   Get-RunParamValue -RunConfig $runConfig -Name "PCMChannelBars" -DefaultValue 0
+}
+$secondaryChannelBarsConfig = [int](To-Double $secondaryChannelBarsRaw)
+if ($secondaryChannelBarsConfig -le 0) {
+   $secondaryChannelBarsConfig = [int](To-Double (Get-RunParamValue -RunConfig $runConfig -Name "SecondOpChannelBars" -DefaultValue 0))
+}
+
+$secondaryMaxOperationsPerDayRaw = if ($script:IsHiran1Mode) {
+   Get-RunParamValue -RunConfig $runConfig -Name "RecontagemMaxOperationsPerDay" -DefaultValue 0
+} else {
+   Get-RunParamValue -RunConfig $runConfig -Name "PCMMaxOperationsPerDay" -DefaultValue 0
+}
+$secondaryMaxOperationsPerDayConfig = [int](To-Double $secondaryMaxOperationsPerDayRaw)
+if ($secondaryMaxOperationsPerDayConfig -le 0) {
+   $secondaryMaxOperationsPerDayConfig = [int](To-Double (Get-RunParamValue -RunConfig $runConfig -Name "SecondOpMaxOperationsPerDay" -DefaultValue 0))
+}
+
+$secondaryReferenceTimeframeRaw = if ($script:IsHiran1Mode) {
+   Get-RunParamRawValue -RunConfig $runConfig -Name "RecontagemReferenceTimeframe" -DefaultValue ""
+} else {
+   Get-RunParamRawValue -RunConfig $runConfig -Name "PCMReferenceTimeframe" -DefaultValue ""
+}
+$secondaryReferenceTimeframeConfig = [string]$secondaryReferenceTimeframeRaw
+if ([string]::IsNullOrWhiteSpace($secondaryReferenceTimeframeConfig)) {
+   $secondaryReferenceTimeframeConfig = [string](Get-RunParamRawValue -RunConfig $runConfig -Name "SecondOpReferenceTimeframe" -DefaultValue "")
+}
+
+$secondaryRuntimeLikelyEnabledConfig = if ($script:IsHiran1Mode) {
+   (
+      $enableSecondaryConfig -and
+      ($secondaryChannelBarsConfig -ge 1) -and
+      ($secondaryMaxOperationsPerDayConfig -gt 0) -and
+      -not [string]::IsNullOrWhiteSpace($secondaryReferenceTimeframeConfig)
+   )
+} else {
+   (
+      $enableSecondaryConfig -and
+      ($secondaryChannelBarsConfig -ge 4) -and
+      ($secondaryMaxOperationsPerDayConfig -gt 0) -and
+      ($secondaryReferenceTimeframeConfig -in @("PERIOD_M1", "PERIOD_M5", "PERIOD_M15"))
+   )
+}
 
 $defaultOutputPath = "docs/relatorios/operacoes/RELATORIO_OPERACOES_JSON.md"
 $normalizedOutputPath = ([string]$OutputPath).Trim() -replace '/', '\'
@@ -1455,7 +1571,7 @@ if ($hasNoTradesFile) {
             missing_to_limit_points = $missingToLimitPointsValue
             rr_max_reached = $rrMaxReachedValue
             rr_min_required = $rrMinRequiredValue
-            pcm_armed_from_notrade = Resolve-NoTradePCMArmedFlag -Row $n -EnablePCMOnNoTrade $enablePCMOnNoTradeLimitTargetConfig -PCMRuntimeLikelyEnabled $pcmRuntimeLikelyEnabledConfig
+            pcm_armed_from_notrade = Resolve-NoTradePCMArmedFlag -Row $n -EnablePCMOnNoTrade $enableSecondaryOnNoTradeLimitTargetConfig -PCMRuntimeLikelyEnabled $secondaryRuntimeLikelyEnabledConfig
          }
       }
       )
@@ -1547,14 +1663,21 @@ for ($tradeIndex = 0; $tradeIndex -lt $rawTrades.Count; $tradeIndex++) {
       $isTurnOperationValue = Is-True $t.is_reversal
    }
    $isPcmOperationValue = Is-True $t.is_pcm_operation
+   if (-not $isPcmOperationValue) { $isPcmOperationValue = Is-True $t.is_recontagem_operation }
+   if (-not $isPcmOperationValue) { $isPcmOperationValue = Is-True $t.is_Recontagem_operation }
+   if (-not $isPcmOperationValue) { $isPcmOperationValue = Is-True $t.is_second_op_operation }
+   if (-not $isPcmOperationValue) { $isPcmOperationValue = Is-True $t.is_Second_op_operation }
    $hasFirstOperationProp = ($null -ne $t.PSObject.Properties["is_first_operation"])
    $isFirstOperationValue = if ($hasFirstOperationProp) { Is-True $t.is_first_operation } else { -not $isTurnOperationValue }
    $hasAddOperationProp = ($null -ne $t.PSObject.Properties["is_add_operation"])
    $isAddOperationValue = if ($hasAddOperationProp) { Is-True $t.is_add_operation } else { $hasAddOnValue }
    $operationCodeRaw = if ($null -ne $t.PSObject.Properties["operation_code"]) { [string]$t.operation_code } else { "" }
    $addOperationCodeRaw = if ($null -ne $t.PSObject.Properties["add_operation_code"]) { [string]$t.add_operation_code } else { "" }
-   if (-not $isPcmOperationValue -and -not [string]::IsNullOrWhiteSpace($operationCodeRaw) -and $operationCodeRaw.ToLowerInvariant().StartsWith("pcm_")) {
-      $isPcmOperationValue = $true
+   if (-not $isPcmOperationValue -and -not [string]::IsNullOrWhiteSpace($operationCodeRaw)) {
+      $operationCodeRawNorm = $operationCodeRaw.ToLowerInvariant()
+      if ($operationCodeRawNorm.StartsWith("pcm_") -or $operationCodeRawNorm.StartsWith("recontagem_") -or $operationCodeRawNorm.StartsWith("second_op_")) {
+         $isPcmOperationValue = $true
+      }
    }
    $hasAddCodeHint = (
       (-not [string]::IsNullOrWhiteSpace($operationCodeRaw) -and $operationCodeRaw -like "add_*") -or
@@ -1605,8 +1728,14 @@ for ($tradeIndex = 0; $tradeIndex -lt $rawTrades.Count; $tradeIndex++) {
    } else {
       $addOperationCodeValue = "-"
       if ($isPcmOperationValue -and -not [string]::IsNullOrWhiteSpace($operationChainCodeValue)) {
-         if ([string]::IsNullOrWhiteSpace($operationCodeValue) -or $operationCodeValue -eq "-" -or $operationCodeValue -like "add_*" -or $operationCodeValue -like "first_*") {
-            $operationCodeValue = ("pcm_" + $operationChainCodeValue)
+         if (
+            [string]::IsNullOrWhiteSpace($operationCodeValue) -or
+            $operationCodeValue -eq "-" -or
+            $operationCodeValue -like "add_*" -or
+            $operationCodeValue -like "first_*" -or
+            $operationCodeValue -like "second_op_*"
+         ) {
+            $operationCodeValue = ($script:SecondaryOpPrefix + $operationChainCodeValue)
          }
       } elseif (-not $isTurnOperationValue -and -not [string]::IsNullOrWhiteSpace($operationChainCodeValue)) {
          if ([string]::IsNullOrWhiteSpace($operationCodeValue) -or $operationCodeValue -eq "-" -or $operationCodeValue -like "add_*") {
@@ -1615,9 +1744,23 @@ for ($tradeIndex = 0; $tradeIndex -lt $rawTrades.Count; $tradeIndex++) {
       }
    }
    $pcmBreakEvenAppliedValue = Is-True $t.pcm_break_even_applied
+   if (-not $pcmBreakEvenAppliedValue) { $pcmBreakEvenAppliedValue = Is-True $t.recontagem_break_even_applied }
+   if (-not $pcmBreakEvenAppliedValue) { $pcmBreakEvenAppliedValue = Is-True $t.Recontagem_break_even_applied }
+   if (-not $pcmBreakEvenAppliedValue) { $pcmBreakEvenAppliedValue = Is-True $t.second_op_break_even_applied }
+   if (-not $pcmBreakEvenAppliedValue) { $pcmBreakEvenAppliedValue = Is-True $t.Second_op_break_even_applied }
    $pcmTraillingStopAppliedValue = Is-True $t.pcm_trailling_stop_applied
+   if (-not $pcmTraillingStopAppliedValue) { $pcmTraillingStopAppliedValue = Is-True $t.recontagem_trailling_stop_applied }
+   if (-not $pcmTraillingStopAppliedValue) { $pcmTraillingStopAppliedValue = Is-True $t.Recontagem_trailling_stop_applied }
+    if (-not $pcmTraillingStopAppliedValue) { $pcmTraillingStopAppliedValue = Is-True $t.second_op_trailling_stop_applied }
+    if (-not $pcmTraillingStopAppliedValue) { $pcmTraillingStopAppliedValue = Is-True $t.Second_op_trailling_stop_applied }
    if (-not $pcmTraillingStopAppliedValue) {
       $pcmTraillingStopAppliedValue = Is-True $t.pcm_trailing_stop_applied
+   }
+   if (-not $pcmTraillingStopAppliedValue) {
+      $pcmTraillingStopAppliedValue = Is-True $t.second_op_trailing_stop_applied
+   }
+   if (-not $pcmTraillingStopAppliedValue) {
+      $pcmTraillingStopAppliedValue = Is-True $t.Second_op_trailing_stop_applied
    }
    $resultValue = [string]$t.result
    $resultNorm = $resultValue.Trim().ToUpperInvariant()
@@ -1745,7 +1888,7 @@ if ($legacyRows.Count -gt 0) {
          $row.operation_code = $row.add_operation_code
          $row.is_first_operation = $false
       } elseif ($row.is_pcm_operation) {
-         $row.operation_code = ("pcm_" + $resolvedChain)
+         $row.operation_code = ($script:SecondaryOpPrefix + $resolvedChain)
          $row.is_first_operation = $false
          $row.is_turn_operation = $false
       } elseif ($row.is_turn_operation) {
@@ -1786,8 +1929,13 @@ foreach ($row in $enrichedTrades) {
    } elseif ($row.is_pcm_operation) {
       $row.is_first_operation = $false
       $row.is_turn_operation = $false
-      if ([string]::IsNullOrWhiteSpace([string]$row.operation_code) -or [string]$row.operation_code -eq "-" -or [string]$row.operation_code -like "first_*") {
-         $row.operation_code = ("pcm_" + $chain)
+      if (
+         [string]::IsNullOrWhiteSpace([string]$row.operation_code) -or
+         [string]$row.operation_code -eq "-" -or
+         [string]$row.operation_code -like "first_*" -or
+         [string]$row.operation_code -like "second_op_*"
+      ) {
+         $row.operation_code = ($script:SecondaryOpPrefix + $chain)
       }
    }
 
@@ -1867,10 +2015,32 @@ $nonAddTrades = @(
       -not $addCode.StartsWith("adon_")
    }
 )
-$tpTrades = @($nonAddTrades | Where-Object { $_.result -eq "TP" })
-$slTrades = @($nonAddTrades | Where-Object { $_.result -eq "SL" })
-$beTrades = @($nonAddTrades | Where-Object { $_.result -eq "BE" })
-$reversalTrades = @($nonAddTrades | Where-Object { $_.is_reversal })
+$firstOpTrades = @(
+   $nonAddTrades |
+   Where-Object {
+      $opCode = ([string]$_.operation_code).ToLowerInvariant()
+      (-not $_.is_pcm_operation) -and
+      (-not $_.is_turn_operation) -and
+      (-not $_.is_reversal) -and
+      ($_.is_first_operation -or $opCode.StartsWith("first_"))
+   }
+)
+$turnofTrades = @(
+   $nonAddTrades |
+   Where-Object {
+      $opCode = ([string]$_.operation_code).ToLowerInvariant()
+      (-not $_.is_pcm_operation) -and
+      ($_.is_turn_operation -or $_.is_reversal -or $opCode.StartsWith("turn_"))
+   }
+)
+
+$tpTrades = @($firstOpTrades | Where-Object { $_.result -eq "TP" })
+$slTrades = @($firstOpTrades | Where-Object { $_.result -eq "SL" })
+$beTrades = @($firstOpTrades | Where-Object { $_.result -eq "BE" })
+$reversalTrades = @($turnofTrades)
+$turnofTpTrades = @($turnofTrades | Where-Object { $_.result -eq "TP" })
+$turnofSlTrades = @($turnofTrades | Where-Object { $_.result -eq "SL" })
+$turnofBeTrades = @($turnofTrades | Where-Object { $_.result -eq "BE" })
 $pcmTrades = @($nonAddTrades | Where-Object { $_.is_pcm_operation })
 $pcmTpTrades = @($pcmTrades | Where-Object { $_.result -eq "TP" })
 $pcmSlTrades = @($pcmTrades | Where-Object { $_.result -eq "SL" })
@@ -2111,7 +2281,7 @@ $builder = [System.Text.StringBuilder]::new()
 [void]$builder.AppendLine("- Periodo das operacoes: $periodStart ate $periodEnd")
 [void]$builder.AppendLine("")
 
-Append-RunConfigSection -Builder $builder -RunConfig $runConfig
+Append-RunConfigSection -Builder $builder -RunConfig $runConfig -IsHiran1Mode $script:IsHiran1Mode
 
 [void]$builder.AppendLine("## Resumo Geral")
 [void]$builder.AppendLine("")
@@ -2121,7 +2291,7 @@ Append-RunConfigSection -Builder $builder -RunConfig $runConfig
 [void]$builder.AppendLine("- BUY: **$buyCount** | SELL: **$sellCount**")
 [void]$builder.AppendLine("- TurnOf (is_turnof=$emojiTrue): **$summaryReversalCount**")
 [void]$builder.AppendLine("- Gatilho de TurnOf (triggered_turnof=$emojiTrue): **$triggeredReversalCount**")
-[void]$builder.AppendLine("- Classificacao de operacao: First **$firstOperationCount** | Turn **$turnOperationCount** | PCM **$pcmOperationCount** | Add **$addOperationCount**")
+[void]$builder.AppendLine("- Classificacao de operacao: First **$firstOperationCount** | Turn **$turnOperationCount** | $($script:SecondaryOpLabel) **$pcmOperationCount** | Add **$addOperationCount**")
 [void]$builder.AppendLine("- SLD (is_sld=$emojiTrue): **$slicedCount**")
 [void]$builder.AppendLine("- Dias sem operacao (no_trade_days): **$($noTradeRows.Count)**")
 [void]$builder.AppendLine("- Operacoes com ADON: **$addOnTradesCount** | Total de ADONs executados: **$totalAddOnEntries**")
@@ -2230,15 +2400,18 @@ Append-TopBottom-Table -Builder $builder -Title "Top 10 Operacoes (Maior Prejuiz
 Append-Trade-Table -Builder $builder -Title "Operacoes (Detalhado)" -Rows $nonAddTrades -IncludeBothDistanceColumns $true
 Append-Trade-Table -Builder $builder -Title "Operacoes com ADON" -Rows $addOnTrades -IncludeBothDistanceColumns $true
 Append-Trade-Table -Builder $builder -Title "Operacoes ADON Puro (Somente Tickets Add)" -Rows $addOperationTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
-Append-Trade-Table -Builder $builder -Title "Operacoes TP" -Rows $tpTrades
-Append-Trade-Table -Builder $builder -Title "Operacoes SL" -Rows $slTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent"
-Append-Trade-Table -Builder $builder -Title "Operacoes TurnOf" -Rows $reversalTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
-Append-Trade-Table -Builder $builder -Title "Operacoes PCM TP" -Rows $pcmTpTrades -IncludeBothDistanceColumns $true
-Append-Trade-Table -Builder $builder -Title "Operacoes PCM SL" -Rows $pcmSlTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
-Append-Trade-Table -Builder $builder -Title "Operacoes PCM BE" -Rows $pcmBeTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
+Append-Trade-Table -Builder $builder -Title "Operacoes First_op TP (flag: first_*)" -Rows $tpTrades
+Append-Trade-Table -Builder $builder -Title "Operacoes First_op SL (flag: first_*)" -Rows $slTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent"
+Append-Trade-Table -Builder $builder -Title "Operacoes First_op BE (flag: first_*)" -Rows $beTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent"
+Append-Trade-Table -Builder $builder -Title "Operacoes TurnOf TP (flag: turn_*)" -Rows $turnofTpTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
+Append-Trade-Table -Builder $builder -Title "Operacoes TurnOf SL (flag: turn_*)" -Rows $turnofSlTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
+Append-Trade-Table -Builder $builder -Title "Operacoes TurnOf BE (flag: turn_*)" -Rows $turnofBeTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
+Append-Trade-Table -Builder $builder -Title ("Operacoes " + $script:SecondaryOpLabel + " TP") -Rows $pcmTpTrades -IncludeBothDistanceColumns $true
+Append-Trade-Table -Builder $builder -Title ("Operacoes " + $script:SecondaryOpLabel + " SL") -Rows $pcmSlTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
+Append-Trade-Table -Builder $builder -Title ("Operacoes " + $script:SecondaryOpLabel + " BE") -Rows $pcmBeTrades -DistanceColumnHeader "Dist. ate TP (%)" -DistanceMetric "max_favorable_to_tp_percent" -IncludeBothDistanceColumns $true
 
 if ($hasNoTradesFile) {
-   Append-NoTrades-Section -Builder $builder -SourcePath $resolvedNoTradesPath -NoTradeRows $noTradeRows
+   Append-NoTrades-Section -Builder $builder -SourcePath $resolvedNoTradesPath -NoTradeRows $noTradeRows -SecondaryOpLabel $script:SecondaryOpLabel
 } else {
    [void]$builder.AppendLine("## Dias sem Operacao (NoTrade)")
    [void]$builder.AppendLine("")

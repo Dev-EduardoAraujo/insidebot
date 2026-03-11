@@ -30,11 +30,15 @@ input int      OpeningMinute = 0;           // Horario de abertura (minuto)
 input int      FirstEntryMaxHour = 16;      // Horario limite para primeira entrada do dia (hora)
 input int      MaxEntryHour = 16;           // Horario limite para entrada (hora)
 input ENUM_TIMEFRAMES ChannelTimeframe = PERIOD_M5;  // Timeframe do canal de abertura
+input ENUM_TIMEFRAMES BreakoutTimeframe = PERIOD_M5; // Timeframe para detectar rompimento da entrada principal
+input int      OpeningChannelBars = 4;      // Quantidade de velas para compor o canal de abertura
 input bool     EnableM15Fallback = true;    // Usar M15 se M5 < range minimo
 input double   MinChannelRange = 2.5;       // Range minimo do canal
 input double   MaxChannelRange = 14.99;     // Range maximo do canal (para projecao)
 input double   SlicedThreshold = 15.0;      // Range para modo sliced (CA = C1)
 input double   BreakoutMinTolerancePoints = 0.0; // Tolerancia minima (em pontos) para confirmar rompimento
+input bool     EnableEntryVerboseLogs = true; // Logs de diagnostico para motivos de nao abertura
+input int      EntryVerboseIntervalSeconds = 60; // Intervalo minimo entre logs repetidos de diagnostico de entrada
 
 input group "--- Parametros de Stop ---"
 input double   StopLossIncrement = 20.0;    // Incremento do SL (%)
@@ -139,7 +143,7 @@ input ulong    MagicNumber = 654321;        // Numero magico
 double g_channelHigh = 0;
 double g_channelLow = 0;
 double g_channelRange = 0;
-datetime g_channelDefinitionTime = 0;  // Fechamento da 4a vela usada para definir o canal
+datetime g_channelDefinitionTime = 0;  // Fechamento da ultima vela usada para definir o canal
 double g_projectedHigh = 0;
 double g_projectedLow = 0;
 bool g_channelCalculated = false;
@@ -187,6 +191,29 @@ double g_pendingClosestPriceToLimit = 0.0;
 double g_pendingMaxRiskRewardObserved = 0.0;
 double g_pendingMinDistanceToLimitPoints = -1.0;
 bool g_pendingLimitTelemetryReady = false;
+bool g_pendingLimitRetryArmed = false;
+ENUM_ORDER_TYPE g_pendingLimitRetryOrderType = ORDER_TYPE_BUY;
+double g_pendingLimitRetryLimitPrice = 0.0;
+double g_pendingLimitRetryStopLoss = 0.0;
+double g_pendingLimitRetryTakeProfit = 0.0;
+double g_pendingLimitRetryLotSize = 0.0;
+string g_pendingLimitRetryOrderComment = "";
+EPendingOrderContext g_pendingLimitRetryContext = PENDING_CONTEXT_NONE;
+bool g_pendingLimitRetryIsReversal = false;
+bool g_pendingLimitRetryIsSliced = false;
+datetime g_pendingLimitRetryChannelDefinitionTime = 0;
+datetime g_pendingLimitRetryTriggerTime = 0;
+bool g_pendingLimitRetryPreserveDailyCycle = false;
+double g_pendingLimitRetryChannelRange = 0.0;
+bool g_pendingLimitRetryIsPCM = false;
+datetime g_pendingLimitRetryNextAttemptTime = 0;
+datetime g_pendingLimitRetryLastLogTime = 0;
+int g_pendingLimitRetryAttempts = 0;
+double g_pendingLimitRetryClosestPrice = 0.0;
+double g_pendingLimitRetryMaxRiskRewardObserved = 0.0;
+datetime g_lastBreakoutProcessedBarTime = 0;
+ENUM_TIMEFRAMES g_lastBreakoutProcessedTimeframe = PERIOD_CURRENT;
+bool g_lastBreakoutProcessedPCM = false;
 int g_negativeAddEntriesExecuted = 0;  // Quantidade de adicoes executadas na operacao atual
 double g_negativeAddExecutedLots = 0.0;  // Soma de lotes executados via addon na operacao atual
 double g_negativeAddExecutedWeightedEntryPrice = 0.0;  // Soma ponderada de preco de entrada dos addons
@@ -357,6 +384,9 @@ datetime g_pcmVerboseLastWaitLogTime = 0;
 datetime g_pcmVerboseLastBlockedLogTime = 0;
 datetime g_pcmVerboseLastEntryLimitLogTime = 0;
 datetime g_pcmVerboseLastFirstEntryLimitLogTime = 0;
+datetime g_entryVerboseLastNoBreakoutLogTime = 0;
+datetime g_entryVerboseLastFirstEntryHourBlockLogTime = 0;
+datetime g_entryVerboseLastChannelInvalidLogTime = 0;
 const long g_chartAllPeriodsMask = 0x01FF;
 int g_lastKnownSymbolChartCount = -1;
 datetime g_lastVisualSyncTime = 0;
@@ -373,7 +403,19 @@ bool ClosePositionByTicketMarket(ulong ticket, string reason);
 bool EnforceStopLossSafetyMonitor(string context);
 void ApplyKillSwitchTradingBlock();
 void LogDailyDDOpeningStatus(string context);
+void LogNoTrade(string reason,
+               string eventType,
+               string entryDirection,
+               double limitPrice,
+               double closestPrice,
+               double stopLoss,
+               double takeProfit,
+               double missingToLimitPoints,
+               double rrMaxReached,
+               double rrMinRequired,
+               bool pcmArmedFromNoTrade);
 void CheckPendingOrderExecution();
+bool ProcessPendingLimitRetryQueue();
 void EnforcePendingQueueByDDBudget(string context);
 bool IsTrackedNegativeAddPendingTicket(ulong ticket);
 int CollectEAPendingOrderTickets(ulong &tickets[]);
@@ -422,6 +464,102 @@ void ResetPendingLimitTelemetry()
    g_pendingMaxRiskRewardObserved = 0.0;
    g_pendingMinDistanceToLimitPoints = -1.0;
    g_pendingLimitTelemetryReady = false;
+}
+
+void ResetPendingLimitRetryState(string reason = "")
+{
+   g_pendingLimitRetryArmed = false;
+   g_pendingLimitRetryOrderType = ORDER_TYPE_BUY;
+   g_pendingLimitRetryLimitPrice = 0.0;
+   g_pendingLimitRetryStopLoss = 0.0;
+   g_pendingLimitRetryTakeProfit = 0.0;
+   g_pendingLimitRetryLotSize = 0.0;
+   g_pendingLimitRetryOrderComment = "";
+   g_pendingLimitRetryContext = PENDING_CONTEXT_NONE;
+   g_pendingLimitRetryIsReversal = false;
+   g_pendingLimitRetryIsSliced = false;
+   g_pendingLimitRetryChannelDefinitionTime = 0;
+   g_pendingLimitRetryTriggerTime = 0;
+   g_pendingLimitRetryPreserveDailyCycle = false;
+   g_pendingLimitRetryChannelRange = 0.0;
+   g_pendingLimitRetryIsPCM = false;
+   g_pendingLimitRetryNextAttemptTime = 0;
+   g_pendingLimitRetryLastLogTime = 0;
+   g_pendingLimitRetryAttempts = 0;
+   g_pendingLimitRetryClosestPrice = 0.0;
+   g_pendingLimitRetryMaxRiskRewardObserved = 0.0;
+
+   if(reason != "")
+      Print("INFO: fila de reenvio LIMIT limpa. motivo=", reason);
+}
+
+void ArmPendingLimitRetryState(ENUM_ORDER_TYPE orderType,
+                               double limitPrice,
+                               double stopLoss,
+                               double takeProfit,
+                               double lotSize,
+                               string orderComment,
+                               EPendingOrderContext pendingContext,
+                               bool isReversalContext,
+                               bool isSlicedContext,
+                               datetime channelDefinitionTimeContext,
+                               datetime triggerTimeContext,
+                               bool preserveDailyCycleContext,
+                               double channelRangeContext,
+                               bool isPCMContext,
+                               string reason)
+{
+   if(g_pendingLimitRetryArmed)
+      return;
+
+   g_pendingLimitRetryArmed = true;
+   g_pendingLimitRetryOrderType = orderType;
+   g_pendingLimitRetryLimitPrice = limitPrice;
+   g_pendingLimitRetryStopLoss = stopLoss;
+   g_pendingLimitRetryTakeProfit = takeProfit;
+   g_pendingLimitRetryLotSize = lotSize;
+   g_pendingLimitRetryOrderComment = orderComment;
+   g_pendingLimitRetryContext = pendingContext;
+   g_pendingLimitRetryIsReversal = isReversalContext;
+   g_pendingLimitRetryIsSliced = isSlicedContext;
+   g_pendingLimitRetryChannelDefinitionTime = channelDefinitionTimeContext;
+   g_pendingLimitRetryTriggerTime = triggerTimeContext;
+   g_pendingLimitRetryPreserveDailyCycle = preserveDailyCycleContext;
+   g_pendingLimitRetryChannelRange = channelRangeContext;
+   g_pendingLimitRetryIsPCM = isPCMContext;
+   g_pendingLimitRetryNextAttemptTime = TimeCurrent();
+   g_pendingLimitRetryLastLogTime = 0;
+   g_pendingLimitRetryAttempts = 0;
+   g_pendingLimitRetryClosestPrice = (orderType == ORDER_TYPE_BUY)
+                                     ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                                     : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   g_pendingLimitRetryMaxRiskRewardObserved = CalculatePotentialRiskReward(orderType,
+                                                                           g_pendingLimitRetryClosestPrice,
+                                                                           stopLoss,
+                                                                           takeProfit);
+   if(g_pendingLimitRetryMaxRiskRewardObserved < 0.0)
+      g_pendingLimitRetryMaxRiskRewardObserved = 0.0;
+
+   Print("INFO: fila de reenvio LIMIT armada. contexto=", PendingOrderContextToString(pendingContext),
+         " | tipo=", EnumToString(orderType),
+         " | limite=", DoubleToString(limitPrice, 5),
+         " | sl=", DoubleToString(stopLoss, 5),
+         " | tp=", DoubleToString(takeProfit, 5),
+         " | lote=", DoubleToString(lotSize, 2),
+         " | motivo=", reason);
+}
+
+bool IsPendingLimitRetryableRetcode(long retcode)
+{
+   return (retcode == TRADE_RETCODE_REQUOTE ||
+           retcode == TRADE_RETCODE_REJECT ||
+           retcode == TRADE_RETCODE_PRICE_CHANGED ||
+           retcode == TRADE_RETCODE_PRICE_OFF ||
+           retcode == TRADE_RETCODE_INVALID_PRICE ||
+           retcode == TRADE_RETCODE_INVALID_STOPS ||
+           retcode == TRADE_RETCODE_TOO_MANY_REQUESTS ||
+           retcode == TRADE_RETCODE_CONNECTION ||
+           retcode == TRADE_RETCODE_TIMEOUT);
 }
 
 double CalculatePotentialRiskReward(ENUM_ORDER_TYPE orderType,
@@ -540,6 +678,7 @@ void ResetPendingOrderContext()
    g_pendingOrderChannelRange = 0.0;
    g_pendingOrderLotSnapshot = 0.0;
    ResetPendingLimitTelemetry();
+   ResetPendingLimitRetryState();
 }
 
 bool IsTradeRetcodeSuccessful(long retcode, bool allowPlaced = true)
@@ -1183,6 +1322,39 @@ bool IsPCMVerboseEnabled()
    return EnablePCMVerboseLogs;
 }
 
+bool IsEntryVerboseEnabled()
+{
+   return EnableEntryVerboseLogs;
+}
+
+int ResolveEntryVerboseIntervalSeconds()
+{
+   if(EntryVerboseIntervalSeconds < 1)
+      return 1;
+   return EntryVerboseIntervalSeconds;
+}
+
+bool ShouldEmitEntryVerbose(datetime &lastEmitTime)
+{
+   if(!IsEntryVerboseEnabled())
+      return false;
+
+   datetime now = TimeCurrent();
+   int intervalSeconds = ResolveEntryVerboseIntervalSeconds();
+   if(lastEmitTime > 0 && (now - lastEmitTime) < intervalSeconds)
+      return false;
+
+   lastEmitTime = now;
+   return true;
+}
+
+void PrintEntryVerboseRateLimited(string message, datetime &lastEmitTime)
+{
+   if(!ShouldEmitEntryVerbose(lastEmitTime))
+      return;
+   Print("ENTRY DEBUG: ", message);
+}
+
 bool ShouldEmitPCMVerbose(datetime &lastEmitTime)
 {
    if(!IsPCMVerboseEnabled())
@@ -1374,6 +1546,13 @@ void ResetPCMActivationAccumulator()
    g_pcmActivationAccumLow = 0.0;
 }
 
+int ResolveOpeningChannelBars()
+{
+   if(OpeningChannelBars <= 0)
+      return 4;
+   return OpeningChannelBars;
+}
+
 bool IsPCMEnabledRuntime()
 {
    if(!EnablePCM)
@@ -1433,6 +1612,18 @@ ENUM_TIMEFRAMES ResolvePCMActiveTimeframe()
       PCMReferenceTimeframe == PERIOD_M15)
       return PCMReferenceTimeframe;
    return PERIOD_M5;
+}
+
+ENUM_TIMEFRAMES ResolveMainBreakoutTimeframe()
+{
+   if(BreakoutTimeframe == PERIOD_CURRENT)
+   {
+      ENUM_TIMEFRAMES chartTimeframe = (ENUM_TIMEFRAMES)Period();
+      if(chartTimeframe > 0)
+         return chartTimeframe;
+      return PERIOD_M5;
+   }
+   return BreakoutTimeframe;
 }
 
 bool IsAfterPCMEntryTimeLimit(const MqlDateTime &timeNow)
@@ -2602,6 +2793,9 @@ int OnInit()
    g_killSwitchNoSLActivatedTime = 0;
    g_killSwitchNoSLLastLogTime = 0;
    g_killSwitchNoSLReason = "";
+   g_lastBreakoutProcessedBarTime = 0;
+   g_lastBreakoutProcessedTimeframe = PERIOD_CURRENT;
+   g_lastBreakoutProcessedPCM = false;
    ClearCurrentTradePositionTickets();
    ClearOrderIntentGuardState();
    ResetPendingOrderContext();
@@ -2663,6 +2857,8 @@ int OnInit()
       Print("WARN: ReversalSLDistanceFactor <= 0. Sera usado 1.0 em runtime.");
    if(ReversalTPDistanceFactor <= 0.0)
       Print("WARN: ReversalTPDistanceFactor <= 0. Sera usado 1.0 em runtime.");
+   if(OpeningChannelBars <= 0)
+      Print("WARN: OpeningChannelBars <= 0. Sera usado 4 em runtime.");
    if(EnablePCM && PCMChannelBars < 4)
       Print("WARN: PCM desabilitada em runtime. PCMChannelBars precisa ser >= 4.");
    if(EnablePCM && PCMMaxOperationsPerDay <= 0)
@@ -2706,6 +2902,8 @@ int OnInit()
       Print("WARN: EnablePCMOnNoTradeLimitTarget ativo, mas EnablePCM esta desabilitado.");
    if(DDVerboseLogIntervalSeconds <= 0)
       Print("WARN: DDVerboseLogIntervalSeconds <= 0. Sera usado intervalo minimo de 1s.");
+   if(EntryVerboseIntervalSeconds <= 0)
+      Print("WARN: EntryVerboseIntervalSeconds <= 0. Sera usado intervalo minimo de 1s.");
 
    // Inicializar log
    if(EnableLogging)
@@ -2741,6 +2939,11 @@ int OnInit()
    Print("Range: ", MinChannelRange, " - ", MaxChannelRange);
    Print("Tolerancia minima de rompimento (pontos): ", BreakoutMinTolerancePoints);
    Print("Timeframe Canal: ", EnumToString(ChannelTimeframe));
+   Print("Timeframe rompimento entrada principal: ", EnumToString(ResolveMainBreakoutTimeframe()),
+         " (param=", EnumToString(BreakoutTimeframe), ")");
+   Print("Barras do canal de abertura: ", ResolveOpeningChannelBars());
+   Print("Verbose entrada logs: ", EnableEntryVerboseLogs ? "Ativo" : "Inativo",
+         " | intervalo(s)=", ResolveEntryVerboseIntervalSeconds());
    Print("Fallback M15: ", EnableM15Fallback ? "Habilitado" : "Desabilitado");
    Print("Modo Limit Only Estrito: ", StrictLimitOnly ? "Ativo" : "Inativo");
    Print("Priorizar LIMIT entrada principal: ", PreferLimitMainEntry ? "Sim" : "Nao");
@@ -2997,6 +3200,9 @@ void ProcessStrategy()
    // Verificar se ordem pendente foi executada (ANTES de bloquear por ticket)
    CheckPendingOrderExecution();
 
+   if(ProcessPendingLimitRetryQueue())
+      return;
+
    if(g_reversalTradeExecuted && !g_pendingOrderPlaced) return;
 
    if(g_pcmPendingActivation)
@@ -3026,7 +3232,12 @@ void ProcessStrategy()
    }
 
    // Se canal foi calculado mas e invalido, nao operar
-   if(!g_channelValid) return;
+   if(!g_channelValid)
+   {
+      PrintEntryVerboseRateLimited("entrada bloqueada: canal invalido para operacao.",
+                                   g_entryVerboseLastChannelInvalidLogTime);
+      return;
+   }
 
    bool pcmEntryFlow = (g_pcmReady && IsPCMEnabledRuntime());
    if(g_firstTradeExecuted && !pcmEntryFlow)
@@ -3077,7 +3288,13 @@ void ProcessStrategy()
    else
    {
       if(time.hour >= FirstEntryMaxHour)
+      {
+         PrintEntryVerboseRateLimited("entrada bloqueada por FirstEntryMaxHour na estrategia principal. agora=" +
+                                      StringFormat("%02d:%02d", time.hour, time.min) +
+                                      " | FirstEntryMaxHour=" + IntegerToString(FirstEntryMaxHour),
+                                      g_entryVerboseLastFirstEntryHourBlockLogTime);
          return;
+      }
    }
 
    // Detectar rompimento
@@ -3101,13 +3318,12 @@ void CalculateOpeningChannel()
 
    // Buscar velas do dia
    int totalBars = Bars(_Symbol, g_activeTimeframe);
+   int requiredBars = ResolveOpeningChannelBars();
    int barsFound = 0;
-
-   double vela1_high = 0, vela1_low = 0;
-   double vela2_high = 0, vela2_low = 0;
-   double vela3_high = 0, vela3_low = 0;
-   double vela4_high = 0, vela4_low = 0;
-   datetime vela4_time = 0;
+   double channelHigh = 0.0;
+   double channelLow = 0.0;
+   bool channelInitialized = false;
+   datetime lastChannelBarTime = 0;
 
    // Percorrer velas da mais antiga para mais nova
    for(int i = totalBars - 1; i >= 0; i--)
@@ -3116,53 +3332,53 @@ void CalculateOpeningChannel()
 
       if(barTime >= dayStart)
       {
-         barsFound++;
+         double barHigh = iHigh(_Symbol, g_activeTimeframe, i);
+         double barLow = iLow(_Symbol, g_activeTimeframe, i);
 
-         if(barsFound == 1)
+         if(!channelInitialized)
          {
-            vela1_high = iHigh(_Symbol, g_activeTimeframe, i);
-            vela1_low = iLow(_Symbol, g_activeTimeframe, i);
+            channelHigh = barHigh;
+            channelLow = barLow;
+            channelInitialized = true;
          }
-         else if(barsFound == 2)
+         else
          {
-            vela2_high = iHigh(_Symbol, g_activeTimeframe, i);
-            vela2_low = iLow(_Symbol, g_activeTimeframe, i);
+            if(barHigh > channelHigh)
+               channelHigh = barHigh;
+            if(barLow < channelLow)
+               channelLow = barLow;
          }
-         else if(barsFound == 3)
+
+         barsFound++;
+         if(barsFound >= requiredBars)
          {
-            vela3_high = iHigh(_Symbol, g_activeTimeframe, i);
-            vela3_low = iLow(_Symbol, g_activeTimeframe, i);
-         }
-         else if(barsFound == 4)
-         {
-            vela4_high = iHigh(_Symbol, g_activeTimeframe, i);
-            vela4_low = iLow(_Symbol, g_activeTimeframe, i);
-            vela4_time = barTime;
+            lastChannelBarTime = barTime;
             break;
          }
       }
    }
 
-   // Verificar se as 4 velas estao fechadas
-   if(barsFound < 4)
+   // Verificar se as velas do canal estao fechadas
+   if(barsFound < requiredBars)
       return;
 
-   datetime vela4_closeTime = vela4_time + PeriodSeconds(g_activeTimeframe);
-   if(currentTime < vela4_closeTime)
+   datetime channelCloseTime = lastChannelBarTime + PeriodSeconds(g_activeTimeframe);
+   if(currentTime < channelCloseTime)
    {
-      Print(" Aguardando fechamento da 4a vela... Fecha as: ", TimeToString(vela4_closeTime, TIME_MINUTES));
+      Print(" Aguardando fechamento da vela #", requiredBars,
+            " do canal... Fecha as: ", TimeToString(channelCloseTime, TIME_MINUTES));
       return;
    }
 
-   // Timestamp efetivo de definicao do canal (fechamento da 4a vela)
-   g_channelDefinitionTime = vela4_closeTime;
+   // Timestamp efetivo de definicao do canal (fechamento da ultima vela considerada)
+   g_channelDefinitionTime = channelCloseTime;
 
    // Calcular range
-   g_channelHigh = MathMax(MathMax(vela1_high, vela2_high), MathMax(vela3_high, vela4_high));
-   g_channelLow = MathMin(MathMin(vela1_low, vela2_low), MathMin(vela3_low, vela4_low));
+   g_channelHigh = channelHigh;
+   g_channelLow = channelLow;
    g_channelRange = g_channelHigh - g_channelLow;
 
-   Print(" Canal calculado:");
+   Print(" Canal calculado com ", requiredBars, " velas:");
    Print("  High: ", g_channelHigh, " | Low: ", g_channelLow, " | Range: ", g_channelRange);
 
    // Validar range
@@ -3424,26 +3640,62 @@ bool IsBreakoutBelow(double closePrice, double level)
    return (closePrice < (level - GetBreakoutToleranceDistance()));
 }
 
+bool IsBreakoutAboveEvent(double previousClosePrice, double closePrice, double level)
+{
+   return (!IsBreakoutAbove(previousClosePrice, level) && IsBreakoutAbove(closePrice, level));
+}
+
+bool IsBreakoutBelowEvent(double previousClosePrice, double closePrice, double level)
+{
+   return (!IsBreakoutBelow(previousClosePrice, level) && IsBreakoutBelow(closePrice, level));
+}
+
+bool ShouldProcessBreakoutForClosedBar(ENUM_TIMEFRAMES breakoutTimeframe, bool isPCMContext)
+{
+   datetime closedBarTime = iTime(_Symbol, breakoutTimeframe, 1);
+   if(closedBarTime <= 0)
+      return false;
+
+   if(g_lastBreakoutProcessedBarTime == closedBarTime &&
+      g_lastBreakoutProcessedTimeframe == breakoutTimeframe &&
+      g_lastBreakoutProcessedPCM == isPCMContext)
+   {
+      return false;
+   }
+
+   g_lastBreakoutProcessedBarTime = closedBarTime;
+   g_lastBreakoutProcessedTimeframe = breakoutTimeframe;
+   g_lastBreakoutProcessedPCM = isPCMContext;
+   return true;
+}
+
 //+------------------------------------------------------------------+
 //| Detecta rompimento com logica de Ciclo 1 (C1)                   |
 //+------------------------------------------------------------------+
 void DetectBreakout()
 {
-   ENUM_TIMEFRAMES breakoutTimeframe = PERIOD_M5;
-   if(g_pcmReady && IsPCMEnabledRuntime())
+   bool isPCMEntry = (g_pcmReady && IsPCMEnabledRuntime());
+   ENUM_TIMEFRAMES breakoutTimeframe = ResolveMainBreakoutTimeframe();
+   if(isPCMEntry)
       breakoutTimeframe = g_pcmActiveTimeframe;
+   if(!ShouldProcessBreakoutForClosedBar(breakoutTimeframe, isPCMEntry))
+      return;
+   if(Bars(_Symbol, breakoutTimeframe) < 3)
+      return;
    double close = iClose(_Symbol, breakoutTimeframe, 1);
+   double prevClose = iClose(_Symbol, breakoutTimeframe, 2);
    double breakoutTolerance = GetBreakoutToleranceDistance();
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    int tolDigits = digits;
    if(tolDigits < 5)
       tolDigits = 5;
+   string tfLabel = EnumToString(breakoutTimeframe);
 
    // Modo SLICED: C1 ja definido como BOTH
    if(g_cycle1Direction == "BOTH")
    {
       // Rompimento para cima
-      if(IsBreakoutAbove(close, g_cycle1High))
+      if(IsBreakoutAboveEvent(prevClose, close, g_cycle1High))
       {
          Print(" ROMPIMENTO COMPRA (sliced)! Close=", close, " > ", g_cycle1High);
          OpenFirstPosition(ORDER_TYPE_BUY);
@@ -3451,13 +3703,18 @@ void DetectBreakout()
       }
 
       // Rompimento para baixo
-      if(IsBreakoutBelow(close, g_cycle1Low))
+      if(IsBreakoutBelowEvent(prevClose, close, g_cycle1Low))
       {
          Print(" ROMPIMENTO VENDA (sliced)! Close=", close, " < ", g_cycle1Low);
          OpenFirstPosition(ORDER_TYPE_SELL);
          return;
       }
 
+      string slicedNoBreakoutMsg = "sem rompimento (SLICED). close=" + DoubleToString(close, digits) +
+                                   " | gatilho_compra>" + DoubleToString(g_cycle1High + breakoutTolerance, tolDigits) +
+                                   " | gatilho_venda<" + DoubleToString(g_cycle1Low - breakoutTolerance, tolDigits) +
+                                   " | tf=" + tfLabel;
+      PrintEntryVerboseRateLimited(slicedNoBreakoutMsg, g_entryVerboseLastNoBreakoutLogTime);
       return;
    }
 
@@ -3465,7 +3722,7 @@ void DetectBreakout()
    if(!g_cycle1Defined)
    {
       // Rompimento para cima
-      if(IsBreakoutAbove(close, g_channelHigh))
+      if(IsBreakoutAboveEvent(prevClose, close, g_channelHigh))
       {
          g_cycle1Direction = "UP";
          g_cycle1High = g_projectedHigh;
@@ -3481,7 +3738,7 @@ void DetectBreakout()
       }
 
       // Rompimento para baixo
-      if(IsBreakoutBelow(close, g_channelLow))
+      if(IsBreakoutBelowEvent(prevClose, close, g_channelLow))
       {
          g_cycle1Direction = "DOWN";
          g_cycle1High = g_channelHigh;
@@ -3496,6 +3753,11 @@ void DetectBreakout()
          return;
       }
 
+      string c1NoBreakoutMsg = "sem rompimento para definir C1. close=" + DoubleToString(close, digits) +
+                               " | gatilho_up>" + DoubleToString(g_channelHigh + breakoutTolerance, tolDigits) +
+                               " | gatilho_down<" + DoubleToString(g_channelLow - breakoutTolerance, tolDigits) +
+                               " | tf=" + tfLabel;
+      PrintEntryVerboseRateLimited(c1NoBreakoutMsg, g_entryVerboseLastNoBreakoutLogTime);
       return;
    }
 
@@ -3503,7 +3765,7 @@ void DetectBreakout()
    if(g_cycle1Direction == "UP")
    {
       // Continuacao: rompe high de C1
-      if(IsBreakoutAbove(close, g_cycle1High))
+      if(IsBreakoutAboveEvent(prevClose, close, g_cycle1High))
       {
          Print(" ROMPIMENTO COMPRA (continuacao)! Close=", close, " > ", g_cycle1High);
          OpenFirstPosition(ORDER_TYPE_BUY);
@@ -3511,17 +3773,23 @@ void DetectBreakout()
       }
 
       // Reversao: rompe low do canal de abertura
-      if(IsBreakoutBelow(close, g_channelLow))
+      if(IsBreakoutBelowEvent(prevClose, close, g_channelLow))
       {
          Print(" ROMPIMENTO VENDA (reversao)! Close=", close, " < ", g_channelLow);
          OpenFirstPosition(ORDER_TYPE_SELL);
          return;
       }
+
+      string upNoBreakoutMsg = "sem rompimento em C1=UP. close=" + DoubleToString(close, digits) +
+                               " | cont_up>" + DoubleToString(g_cycle1High + breakoutTolerance, tolDigits) +
+                               " | rev_down<" + DoubleToString(g_channelLow - breakoutTolerance, tolDigits) +
+                               " | tf=" + tfLabel;
+      PrintEntryVerboseRateLimited(upNoBreakoutMsg, g_entryVerboseLastNoBreakoutLogTime);
    }
    else if(g_cycle1Direction == "DOWN")
    {
       // Continuacao: rompe low de C1
-      if(IsBreakoutBelow(close, g_cycle1Low))
+      if(IsBreakoutBelowEvent(prevClose, close, g_cycle1Low))
       {
          Print(" ROMPIMENTO VENDA (continuacao)! Close=", close, " < ", g_cycle1Low);
          OpenFirstPosition(ORDER_TYPE_SELL);
@@ -3529,12 +3797,18 @@ void DetectBreakout()
       }
 
       // Reversao: rompe high do canal de abertura
-      if(IsBreakoutAbove(close, g_channelHigh))
+      if(IsBreakoutAboveEvent(prevClose, close, g_channelHigh))
       {
          Print(" ROMPIMENTO COMPRA (reversao)! Close=", close, " > ", g_channelHigh);
          OpenFirstPosition(ORDER_TYPE_BUY);
          return;
       }
+
+      string downNoBreakoutMsg = "sem rompimento em C1=DOWN. close=" + DoubleToString(close, digits) +
+                                 " | cont_down<" + DoubleToString(g_cycle1Low - breakoutTolerance, tolDigits) +
+                                 " | rev_up>" + DoubleToString(g_channelHigh + breakoutTolerance, tolDigits) +
+                                 " | tf=" + tfLabel;
+      PrintEntryVerboseRateLimited(downNoBreakoutMsg, g_entryVerboseLastNoBreakoutLogTime);
    }
 }
 
@@ -3835,6 +4109,12 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType,
    if(IsNoSLKillSwitchActive("PlaceLimitOrder"))
       return;
 
+   if(g_pendingLimitRetryArmed)
+   {
+      Print("INFO: PlaceLimitOrder ignorado: fila de reenvio LIMIT ja armada.");
+      return;
+   }
+
    ConfigureTradeFillingMode("PlaceLimitOrder");
    if(!ValidateTradePermissions("PlaceLimitOrder", false))
       return;
@@ -3909,7 +4189,24 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType,
                                         takeProfit,
                                         true,
                                         "PlaceLimitOrder"))
+   {
+      ArmPendingLimitRetryState(orderType,
+                                limitPrice,
+                                stopLoss,
+                                takeProfit,
+                                lotSize,
+                                orderComment,
+                                pendingContext,
+                                isReversalContext,
+                                isSlicedContext,
+                                channelDefinitionTimeContext,
+                                triggerTimeContext,
+                                preserveDailyCycleContext,
+                                channelRangeContext,
+                                isPCMContext,
+                                "broker_levels_precheck");
       return;
+   }
 
    int ddCandidatePriority = DD_QUEUE_FIRST;
    if(pendingContext == PENDING_CONTEXT_REVERSAL || pendingContext == PENDING_CONTEXT_OVERNIGHT_REVERSAL)
@@ -3981,9 +4278,318 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType,
             " | reversal=", g_pendingOrderIsReversal ? "true" : "false",
             " | pcm=", g_pendingOrderIsPCM ? "true" : "false",
             " | preserve_daily_cycle=", g_pendingOrderPreserveDailyCycle ? "true" : "false");
+      ResetPendingLimitRetryState("ordem limite colocada");
    }
    else
-      Print(" Erro: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
+   {
+      long retcode = trade.ResultRetcode();
+      Print(" Erro: ", retcode, " - ", trade.ResultRetcodeDescription());
+      if(IsPendingLimitRetryableRetcode(retcode))
+      {
+         ArmPendingLimitRetryState(orderType,
+                                   limitPrice,
+                                   stopLoss,
+                                   takeProfit,
+                                   lotSize,
+                                   orderComment,
+                                   pendingContext,
+                                   isReversalContext,
+                                   isSlicedContext,
+                                   channelDefinitionTimeContext,
+                                   triggerTimeContext,
+                                   preserveDailyCycleContext,
+                                   channelRangeContext,
+                                   isPCMContext,
+                                   "broker_reject_retcode_" + IntegerToString((int)retcode));
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Reenvio controlado de LIMIT rejeitada pelo broker                |
+//+------------------------------------------------------------------+
+bool ProcessPendingLimitRetryQueue()
+{
+   if(!g_pendingLimitRetryArmed)
+      return false;
+
+   if(IsNoSLKillSwitchActive("ProcessPendingLimitRetryQueue"))
+      return true;
+
+   if(g_pendingOrderPlaced)
+   {
+      ResetPendingLimitRetryState("ordem pendente principal ja ativa");
+      return true;
+   }
+
+   if(g_currentTicket > 0 && PositionSelectByTicket(g_currentTicket))
+   {
+      ResetPendingLimitRetryState("posicao ja aberta");
+      return true;
+   }
+
+   datetime nowTs = TimeCurrent();
+   if(g_pendingLimitRetryNextAttemptTime > 0 && nowTs < g_pendingLimitRetryNextAttemptTime)
+      return true;
+
+   if(!ValidateTradePermissions("ProcessPendingLimitRetryQueue", false))
+   {
+      g_pendingLimitRetryNextAttemptTime = nowTs + 5;
+      return true;
+   }
+
+   if(IsDrawdownLimitReached("ProcessPendingLimitRetryQueue"))
+   {
+      g_pendingLimitRetryNextAttemptTime = nowTs + 10;
+      return true;
+   }
+
+   MqlDateTime timeNow;
+   TimeToStruct(nowTs, timeNow);
+   if(g_pendingLimitRetryContext == PENDING_CONTEXT_FIRST_ENTRY)
+   {
+      if(g_pendingLimitRetryIsPCM)
+      {
+         if(IsAfterPCMEntryTimeLimit(timeNow) ||
+            (!PCMIgnoreFirstEntryMaxHour && timeNow.hour >= FirstEntryMaxHour))
+         {
+            ResetPendingLimitRetryState("limite horario da entrada PCM");
+            return true;
+         }
+      }
+      else if(timeNow.hour >= FirstEntryMaxHour)
+      {
+         ResetPendingLimitRetryState("limite horario da primeira entrada");
+         return true;
+      }
+   }
+   else if((g_pendingLimitRetryContext == PENDING_CONTEXT_REVERSAL ||
+            g_pendingLimitRetryContext == PENDING_CONTEXT_OVERNIGHT_REVERSAL) &&
+           !IsReversalAllowedByEntryHourNow())
+   {
+      MarkReversalBlockedByEntryHour();
+      ResetPendingLimitRetryState("limite horario da virada");
+      return true;
+   }
+
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double referencePrice = (g_pendingLimitRetryOrderType == ORDER_TYPE_BUY) ? currentAsk : currentBid;
+   if(referencePrice > 0.0)
+   {
+      if(g_pendingLimitRetryClosestPrice <= 0.0)
+         g_pendingLimitRetryClosestPrice = referencePrice;
+
+      if(g_pendingLimitRetryOrderType == ORDER_TYPE_BUY)
+      {
+         if(referencePrice < g_pendingLimitRetryClosestPrice)
+            g_pendingLimitRetryClosestPrice = referencePrice;
+      }
+      else
+      {
+         if(referencePrice > g_pendingLimitRetryClosestPrice)
+            g_pendingLimitRetryClosestPrice = referencePrice;
+      }
+
+      double rrNow = CalculatePotentialRiskReward(g_pendingLimitRetryOrderType,
+                                                  referencePrice,
+                                                  g_pendingLimitRetryStopLoss,
+                                                  g_pendingLimitRetryTakeProfit);
+      if(rrNow > g_pendingLimitRetryMaxRiskRewardObserved)
+         g_pendingLimitRetryMaxRiskRewardObserved = rrNow;
+   }
+
+   bool targetReachedBeforeFill = false;
+   if(g_pendingLimitRetryOrderType == ORDER_TYPE_BUY)
+      targetReachedBeforeFill = (currentAsk >= g_pendingLimitRetryTakeProfit);
+   else if(g_pendingLimitRetryOrderType == ORDER_TYPE_SELL)
+      targetReachedBeforeFill = (currentBid <= g_pendingLimitRetryTakeProfit);
+
+   if(targetReachedBeforeFill)
+   {
+      bool pcmArmedFromNoTrade = false;
+      if(g_pendingLimitRetryContext == PENDING_CONTEXT_FIRST_ENTRY)
+      {
+         pcmArmedFromNoTrade = SchedulePCMActivationFromNoTradeLimitTarget(nowTs,
+                                                                           g_pendingLimitRetryMaxRiskRewardObserved,
+                                                                           MinRiskReward);
+      }
+
+      int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+      if(digits <= 0)
+         digits = 2;
+      double missingToLimitPoints = CalculateMissingToLimitPoints(g_pendingLimitRetryOrderType,
+                                                                  g_pendingLimitRetryClosestPrice,
+                                                                  g_pendingLimitRetryLimitPrice);
+      string directionText = (g_pendingLimitRetryOrderType == ORDER_TYPE_BUY) ? "BUY" : "SELL";
+      string reason = "Retry LIMIT cancelada: preco atingiu alvo projetado antes da execucao (tipo=" + directionText +
+                      " preco=" + DoubleToString(referencePrice, digits) +
+                      " tp=" + DoubleToString(g_pendingLimitRetryTakeProfit, digits) + ")";
+      LogNoTrade(reason,
+                 "LIMIT_RETRY_CANCELED_TARGET_REACHED",
+                 directionText,
+                 g_pendingLimitRetryLimitPrice,
+                 g_pendingLimitRetryClosestPrice,
+                 g_pendingLimitRetryStopLoss,
+                 g_pendingLimitRetryTakeProfit,
+                 missingToLimitPoints,
+                 g_pendingLimitRetryMaxRiskRewardObserved,
+                 MinRiskReward,
+                 pcmArmedFromNoTrade);
+
+      ConsumeCycleAfterPendingCancel();
+      g_tradeEntryTime = 0;
+      g_tradeReversal = false;
+      g_tradePCM = false;
+      g_tradeChannelDefinitionTime = 0;
+      g_tradeEntryExecutionType = "";
+      g_tradeTriggerTime = 0;
+      ResetNegativeAddState();
+      ResetCurrentTradeFloatingMetrics();
+      g_currentOperationChainId = 0;
+      ResetReversalHourBlockState();
+      ResetPendingLimitRetryState("alvo projetado atingido antes do fill");
+      return true;
+   }
+
+   ulong equivalentPendingTicket = 0;
+   if(FindEquivalentPendingOrderTicket(g_pendingLimitRetryOrderType,
+                                       g_pendingLimitRetryLotSize,
+                                       g_pendingLimitRetryLimitPrice,
+                                       g_pendingLimitRetryStopLoss,
+                                       g_pendingLimitRetryTakeProfit,
+                                       equivalentPendingTicket))
+   {
+      RegisterMainPendingOrderState(equivalentPendingTicket,
+                                    g_pendingLimitRetryOrderType,
+                                    g_pendingLimitRetryLotSize,
+                                    g_pendingLimitRetryStopLoss,
+                                    g_pendingLimitRetryTakeProfit,
+                                    g_pendingLimitRetryContext,
+                                    g_pendingLimitRetryIsReversal,
+                                    g_pendingLimitRetryIsSliced,
+                                    g_pendingLimitRetryChannelDefinitionTime,
+                                    g_pendingLimitRetryTriggerTime,
+                                    g_pendingLimitRetryPreserveDailyCycle,
+                                    g_pendingLimitRetryChannelRange,
+                                    g_pendingLimitRetryIsPCM,
+                                    g_pendingLimitRetryLimitPrice);
+      ResetPendingLimitRetryState("ordem equivalente encontrada no retry");
+      return true;
+   }
+
+   if(!ValidateStopLossForOrder(g_pendingLimitRetryOrderType,
+                                g_pendingLimitRetryLimitPrice,
+                                g_pendingLimitRetryStopLoss,
+                                "RetryPendingLimitOrder"))
+   {
+      ResetPendingLimitRetryState("stop loss invalido no retry");
+      return true;
+   }
+
+   if(!ValidateBrokerLevelsForOrderSend(g_pendingLimitRetryOrderType,
+                                        g_pendingLimitRetryLimitPrice,
+                                        g_pendingLimitRetryStopLoss,
+                                        g_pendingLimitRetryTakeProfit,
+                                        true,
+                                        "RetryPendingLimitOrder"))
+   {
+      g_pendingLimitRetryNextAttemptTime = nowTs + 5;
+      return true;
+   }
+
+   int ddCandidatePriority = DD_QUEUE_FIRST;
+   if(g_pendingLimitRetryContext == PENDING_CONTEXT_REVERSAL ||
+      g_pendingLimitRetryContext == PENDING_CONTEXT_OVERNIGHT_REVERSAL)
+      ddCandidatePriority = DD_QUEUE_TURNOF;
+
+   if(!IsProjectedDrawdownWithinLimits("RetryPendingLimitOrder",
+                                       ddCandidatePriority,
+                                       g_pendingLimitRetryOrderType,
+                                       g_pendingLimitRetryLotSize,
+                                       g_pendingLimitRetryLimitPrice,
+                                       g_pendingLimitRetryStopLoss,
+                                       true,
+                                       true))
+   {
+      g_pendingLimitRetryNextAttemptTime = nowTs + 10;
+      return true;
+   }
+
+   double epsilon = g_pointValue;
+   if(epsilon <= 0.0)
+      epsilon = 0.00001;
+   double currentPrice = (g_pendingLimitRetryOrderType == ORDER_TYPE_BUY) ? currentAsk : currentBid;
+   bool validOrder = false;
+   if(g_pendingLimitRetryOrderType == ORDER_TYPE_BUY)
+      validOrder = (g_pendingLimitRetryLimitPrice <= (currentPrice + epsilon) &&
+                    g_pendingLimitRetryStopLoss < g_pendingLimitRetryLimitPrice &&
+                    g_pendingLimitRetryTakeProfit > g_pendingLimitRetryLimitPrice);
+   else
+      validOrder = (g_pendingLimitRetryLimitPrice >= (currentPrice - epsilon) &&
+                    g_pendingLimitRetryStopLoss > g_pendingLimitRetryLimitPrice &&
+                    g_pendingLimitRetryTakeProfit < g_pendingLimitRetryLimitPrice);
+
+   if(!validOrder)
+   {
+      g_pendingLimitRetryNextAttemptTime = nowTs + 5;
+      return true;
+   }
+
+   string retryGuardTag = "PENDING_RETRY_" + PendingOrderContextToString(g_pendingLimitRetryContext);
+   if(g_pendingLimitRetryIsPCM)
+      retryGuardTag += "_PCM";
+   string retryGuardKey = BuildOrderIntentKey(retryGuardTag,
+                                              g_pendingLimitRetryOrderType,
+                                              g_pendingLimitRetryLotSize,
+                                              g_pendingLimitRetryLimitPrice,
+                                              g_pendingLimitRetryStopLoss,
+                                              g_pendingLimitRetryTakeProfit,
+                                              0);
+   if(IsOrderIntentBlocked(retryGuardKey, "ProcessPendingLimitRetryQueue", 2))
+      return true;
+
+   ConfigureTradeFillingMode("ProcessPendingLimitRetryQueue");
+   bool sendResult = false;
+   if(g_pendingLimitRetryOrderType == ORDER_TYPE_BUY)
+      sendResult = trade.BuyLimit(g_pendingLimitRetryLotSize, g_pendingLimitRetryLimitPrice, _Symbol,
+                                  g_pendingLimitRetryStopLoss, g_pendingLimitRetryTakeProfit,
+                                  ORDER_TIME_DAY, 0, g_pendingLimitRetryOrderComment);
+   else
+      sendResult = trade.SellLimit(g_pendingLimitRetryLotSize, g_pendingLimitRetryLimitPrice, _Symbol,
+                                   g_pendingLimitRetryStopLoss, g_pendingLimitRetryTakeProfit,
+                                   ORDER_TIME_DAY, 0, g_pendingLimitRetryOrderComment);
+
+   if(IsTradeOperationSuccessful(sendResult, true) && trade.ResultOrder() > 0)
+   {
+      RegisterMainPendingOrderState(trade.ResultOrder(),
+                                    g_pendingLimitRetryOrderType,
+                                    g_pendingLimitRetryLotSize,
+                                    g_pendingLimitRetryStopLoss,
+                                    g_pendingLimitRetryTakeProfit,
+                                    g_pendingLimitRetryContext,
+                                    g_pendingLimitRetryIsReversal,
+                                    g_pendingLimitRetryIsSliced,
+                                    g_pendingLimitRetryChannelDefinitionTime,
+                                    g_pendingLimitRetryTriggerTime,
+                                    g_pendingLimitRetryPreserveDailyCycle,
+                                    g_pendingLimitRetryChannelRange,
+                                    g_pendingLimitRetryIsPCM,
+                                    g_pendingLimitRetryLimitPrice);
+      ResetPendingLimitRetryState("retry enviado com sucesso");
+      return true;
+   }
+
+   long retryRetcode = trade.ResultRetcode();
+   if(IsPendingLimitRetryableRetcode(retryRetcode))
+   {
+      g_pendingLimitRetryAttempts++;
+      g_pendingLimitRetryNextAttemptTime = nowTs + 5;
+      return true;
+   }
+
+   ResetPendingLimitRetryState("retcode nao retryavel: " + IntegerToString((int)retryRetcode));
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -10640,6 +11246,10 @@ void ResetDaily()
    g_cycle1High = 0;
    g_cycle1Low = 0;
    g_pendingOrderPlaced = false;
+   ResetPendingLimitRetryState("reset diario");
+   g_lastBreakoutProcessedBarTime = 0;
+   g_lastBreakoutProcessedTimeframe = PERIOD_CURRENT;
+   g_lastBreakoutProcessedPCM = false;
    g_usingM15 = false;
    g_activeTimeframe = ChannelTimeframe;
    g_lastResetTime = TimeCurrent();
@@ -10824,6 +11434,7 @@ string BuildRunConfigJson(datetime startTime, datetime endTime)
    cfg += "    \"selected_parameters\": {\n";
    cfg += "      \"OpeningHour\": " + IntegerToString(OpeningHour) + ",\n";
    cfg += "      \"OpeningMinute\": " + IntegerToString(OpeningMinute) + ",\n";
+   cfg += "      \"OpeningChannelBars\": " + IntegerToString(ResolveOpeningChannelBars()) + ",\n";
    cfg += "      \"FirstEntryMaxHour\": " + IntegerToString(FirstEntryMaxHour) + ",\n";
    cfg += "      \"RiskPercent\": " + DoubleToString(RiskPercent, 2) + ",\n";
    cfg += "      \"UseInitialDepositForRisk\": " + BoolToJson(UseInitialDepositForRisk) + ",\n";
@@ -10833,7 +11444,10 @@ string BuildRunConfigJson(datetime startTime, datetime endTime)
    cfg += "      \"MinChannelRange\": " + DoubleToString(MinChannelRange, 2) + ",\n";
    cfg += "      \"MaxChannelRange\": " + DoubleToString(MaxChannelRange, 2) + ",\n";
    cfg += "      \"SlicedThreshold\": " + DoubleToString(SlicedThreshold, 2) + ",\n";
+   cfg += "      \"BreakoutTimeframe\": \"" + EnumToString(ResolveMainBreakoutTimeframe()) + "\",\n";
    cfg += "      \"BreakoutMinTolerancePoints\": " + DoubleToString(BreakoutMinTolerancePoints, 2) + ",\n";
+   cfg += "      \"EnableEntryVerboseLogs\": " + BoolToJson(EnableEntryVerboseLogs) + ",\n";
+   cfg += "      \"EntryVerboseIntervalSeconds\": " + IntegerToString(ResolveEntryVerboseIntervalSeconds()) + ",\n";
    cfg += "      \"SlicedMultiplier\": " + DoubleToString(SlicedMultiplier, 2) + ",\n";
    cfg += "      \"EnableM15Fallback\": " + BoolToJson(EnableM15Fallback) + ",\n";
    cfg += "      \"MaxEntryHour\": " + IntegerToString(MaxEntryHour) + ",\n";

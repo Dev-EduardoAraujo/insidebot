@@ -99,11 +99,22 @@ class TradingDashboard {
     renderAdditionalSections() {
         const data = this.currentData;
         const tables = data.section_tables || {};
+        const secondaryOpLabel = data.secondary_op_label || 'Recontagem';
+        this.setText('firstOpsTpTitle', 'Operacoes First_op TP');
+        this.setText('firstOpsSlTitle', 'Operacoes First_op SL');
+        this.setText('firstOpsBeTitle', 'Operacoes First_op BE');
+        this.setText('turnofOpsTpTitle', 'Operacoes TurnOf TP');
+        this.setText('turnofOpsSlTitle', 'Operacoes TurnOf SL');
+        this.setText('turnofOpsBeTitle', 'Operacoes TurnOf BE');
+        this.setText('secondaryOpsTpTitle', `Operacoes ${secondaryOpLabel} TP`);
+        this.setText('secondaryOpsSlTitle', `Operacoes ${secondaryOpLabel} SL`);
+        this.setText('secondaryOpsBeTitle', `Operacoes ${secondaryOpLabel} BE`);
         
         // Detailed Operations
         if (tables.detailed_ops) {
             document.getElementById('detailedOps').innerHTML = this.renderTableSection(tables.detailed_ops, {
-                addDailyClosingBalance: true
+                addDailyClosingBalance: true,
+                excludeAddonOps: true
             });
         }
         
@@ -117,36 +128,61 @@ class TradingDashboard {
             document.getElementById('addonOnlyOps').innerHTML = this.renderTableSection(tables.addon_only_ops);
         }
         
-        // TP Operations
-        if (tables.tp_ops) {
-            document.getElementById('tpOps').innerHTML = this.renderTableSection(tables.tp_ops);
+        // First_op Operations (split TP/SL/BE)
+        if (tables.first_tp_ops) {
+            document.getElementById('firstTpOps').innerHTML = this.renderTableSection(tables.first_tp_ops, { excludeAddonOps: true });
+        } else if (tables.tp_ops) {
+            document.getElementById('firstTpOps').innerHTML = this.renderTableSection(tables.tp_ops, { excludeAddonOps: true });
+        } else {
+            document.getElementById('firstTpOps').innerHTML = this.renderTableSection(null);
         }
-        
-        // SL Operations
-        if (tables.sl_ops) {
-            document.getElementById('slOps').innerHTML = this.renderTableSection(tables.sl_ops);
+        if (tables.first_sl_ops) {
+            document.getElementById('firstSlOps').innerHTML = this.renderTableSection(tables.first_sl_ops, { excludeAddonOps: true });
+        } else if (tables.sl_ops) {
+            document.getElementById('firstSlOps').innerHTML = this.renderTableSection(tables.sl_ops, { excludeAddonOps: true });
+        } else {
+            document.getElementById('firstSlOps').innerHTML = this.renderTableSection(null);
         }
-        
-        // Reversal Operations
-        if (tables.reversal_ops) {
-            document.getElementById('reversalOps').innerHTML = this.renderTableSection(tables.reversal_ops);
+        if (tables.first_be_ops) {
+            document.getElementById('firstBeOps').innerHTML = this.renderTableSection(tables.first_be_ops, { excludeAddonOps: true });
+        } else {
+            document.getElementById('firstBeOps').innerHTML = this.renderTableSection(null);
         }
 
-        // PCM Operations (split)
+        // TurnOf Operations (split TP/SL/BE)
+        if (tables.turnof_tp_ops) {
+            document.getElementById('turnofTpOps').innerHTML = this.renderTableSection(tables.turnof_tp_ops, { excludeAddonOps: true });
+        } else if (tables.reversal_ops) {
+            document.getElementById('turnofTpOps').innerHTML = this.renderTableSection(tables.reversal_ops, { excludeAddonOps: true });
+        } else {
+            document.getElementById('turnofTpOps').innerHTML = this.renderTableSection(null);
+        }
+        if (tables.turnof_sl_ops) {
+            document.getElementById('turnofSlOps').innerHTML = this.renderTableSection(tables.turnof_sl_ops, { excludeAddonOps: true });
+        } else {
+            document.getElementById('turnofSlOps').innerHTML = this.renderTableSection(null);
+        }
+        if (tables.turnof_be_ops) {
+            document.getElementById('turnofBeOps').innerHTML = this.renderTableSection(tables.turnof_be_ops, { excludeAddonOps: true });
+        } else {
+            document.getElementById('turnofBeOps').innerHTML = this.renderTableSection(null);
+        }
+
+        // Recontagem Operations (split)
         if (tables.pcm_tp_ops) {
-            document.getElementById('pcmTpOps').innerHTML = this.renderTableSection(tables.pcm_tp_ops);
+            document.getElementById('pcmTpOps').innerHTML = this.renderTableSection(tables.pcm_tp_ops, { excludeAddonOps: true });
         } else if (tables.pcm_ops) {
-            document.getElementById('pcmTpOps').innerHTML = this.renderTableSection(tables.pcm_ops);
+            document.getElementById('pcmTpOps').innerHTML = this.renderTableSection(tables.pcm_ops, { excludeAddonOps: true });
         } else {
             document.getElementById('pcmTpOps').innerHTML = this.renderTableSection(null);
         }
         if (tables.pcm_sl_ops) {
-            document.getElementById('pcmSlOps').innerHTML = this.renderTableSection(tables.pcm_sl_ops);
+            document.getElementById('pcmSlOps').innerHTML = this.renderTableSection(tables.pcm_sl_ops, { excludeAddonOps: true });
         } else {
             document.getElementById('pcmSlOps').innerHTML = this.renderTableSection(null);
         }
         if (tables.pcm_be_ops) {
-            document.getElementById('pcmBeOps').innerHTML = this.renderTableSection(tables.pcm_be_ops);
+            document.getElementById('pcmBeOps').innerHTML = this.renderTableSection(tables.pcm_be_ops, { excludeAddonOps: true });
         } else {
             document.getElementById('pcmBeOps').innerHTML = this.renderTableSection(null);
         }
@@ -169,6 +205,19 @@ class TradingDashboard {
                     </div>
                 </div>
             `;
+
+            document.getElementById('firstOpNotActivatedDropdown').innerHTML = `
+                <div class="table-section">
+                    <div class="table-header">Total: <strong>${noTradeData.first_op_not_activated_count || '0'}</strong> eventos</div>
+                    <div class="table-info">Eventos de first_op nao ativada por LIMIT cancelada/nao enviada antes da execucao</div>
+                    <div class="table-container">
+                        ${noTradeData.first_op_not_activated_table ? this.markdownTableToHtml(noTradeData.first_op_not_activated_table) : '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">Sem dados</p>'}
+                    </div>
+                </div>
+            `;
+        } else {
+            document.getElementById('noTradeDropdown').innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">Sem dados</p>';
+            document.getElementById('firstOpNotActivatedDropdown').innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">Sem dados</p>';
         }
     }
     
@@ -176,15 +225,77 @@ class TradingDashboard {
         if (!section || !section.table) {
             return '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">Sem dados</p>';
         }
+
+        let tableMarkdown = section.table;
+        let total = section.total;
+        if (options.excludeAddonOps) {
+            const filtered = this.filterOutAddonRows(tableMarkdown);
+            tableMarkdown = filtered.table;
+            total = String(filtered.total);
+        }
+        if (!tableMarkdown || !tableMarkdown.trim()) {
+            return '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">Sem dados</p>';
+        }
         
         return `
             <div class="table-section">
-                <div class="table-header">Total: <strong>${section.total}</strong> operacoes</div>
+                <div class="table-header">Total: <strong>${total}</strong> operacoes</div>
                 <div class="table-container">
-                    ${this.markdownTableToHtml(section.table, options)}
+                    ${this.markdownTableToHtml(tableMarkdown, options)}
                 </div>
             </div>
         `;
+    }
+
+    isTruthyTableCell(value) {
+        const text = String(value || '').trim().toLowerCase();
+        return (
+            text === '✅' ||
+            text === 'âœ…' ||
+            text === 'true' ||
+            text === 'sim' ||
+            text === 'yes' ||
+            text === '1'
+        );
+    }
+
+    filterOutAddonRows(markdown) {
+        const lines = String(markdown || '').trim().split('\n');
+        if (lines.length < 2) {
+            return { table: markdown, total: 0 };
+        }
+
+        const headerLine = lines[0];
+        const separatorLine = lines[1];
+        const rowLines = lines.slice(2).filter((line) => line.trim());
+        const headers = headerLine.split('|').map((h) => h.trim()).filter((h) => h);
+
+        const adonOpIdx = headers.findIndex((h) => {
+            const normalized = this.normalizeTableHeader(h);
+            return normalized === 'adon op' || normalized === 'adonop';
+        });
+        const opCodeIdx = headers.findIndex((h) => {
+            const normalized = this.normalizeTableHeader(h);
+            return normalized === 'op code' || normalized === 'opcode';
+        });
+
+        if (adonOpIdx < 0 && opCodeIdx < 0) {
+            return { table: markdown, total: rowLines.length };
+        }
+
+        const filteredRows = rowLines.filter((line) => {
+            const cells = line.split('|').map((c) => c.trim()).filter((c) => c !== '');
+            const adonOpCell = adonOpIdx >= 0 ? cells[adonOpIdx] : '';
+            const opCodeCell = String(opCodeIdx >= 0 ? (cells[opCodeIdx] || '') : '').trim().toLowerCase();
+            const isAddonOperation =
+                this.isTruthyTableCell(adonOpCell) ||
+                opCodeCell.startsWith('add_') ||
+                opCodeCell.startsWith('adon_');
+            return !isAddonOperation;
+        });
+
+        const filteredTable = [headerLine, separatorLine, ...filteredRows].join('\n');
+        return { table: filteredTable, total: filteredRows.length };
     }
     
     markdownTableToHtml(markdown, options = {}) {
@@ -266,6 +377,7 @@ class TradingDashboard {
 
     renderBotParameters() {
         const params = this.currentData.bot_parameters || {};
+        const secondaryOpLabel = (this.currentData && this.currentData.secondary_op_label) || 'Recontagem';
         const container = document.getElementById('botParams');
         
         if (!params || Object.keys(params).length === 0) {
@@ -288,15 +400,34 @@ class TradingDashboard {
             },
             {
                 title: 'Risco e Retorno',
-                keys: ['RiskPercent', 'UseInitialDepositForRisk', 'Usar deposito inicial da conta como base fixa do risco', 'FixedLotAllEntries', 'Lote fixo para todas as entradas (0 desativa)', 'MinRiskReward', 'DrawdownPercentReference', 'Referencia DD percentual', 'MaxDailyDrawdownPercent', 'MaxDrawdownPercent', 'MaxDailyDrawdownAmount', 'MaxDrawdownAmount', 'EnableVerboseDDLogs', 'Verbose DD logs', 'DDVerboseLogIntervalSeconds', 'Intervalo verbose DD (s)']
+                keys: [
+                    'RiskPercent', 'UseInitialDepositForRisk', 'Usar deposito inicial da conta como base fixa do risco',
+                    'InitialDepositReferenceValue', 'Deposito inicial',
+                    'FixedLotAllEntries', 'Lote fixo para todas as entradas (0 desativa)',
+                    'MinRiskReward',
+                    'DrawdownPercentReference', 'Referencia DD percentual',
+                    'MaxDailyDrawdownPercent', 'MaxDrawdownPercent',
+                    'MaxDailyDrawdownAmount', 'MaxDrawdownAmount',
+                    'ForceDayBalanceDDWhenUnderInitialDeposit',
+                    'EnableVerboseDDLogs', 'Verbose DD logs',
+                    'DDVerboseLogIntervalSeconds', 'Intervalo verbose DD (s)'
+                ]
             },
             {
                 title: 'TurnOf',
-                keys: ['EnableReversal', 'EnableOvernightReversal', 'ReversalMultiplier', 'ReversalSLDistanceFactor', 'ReversalTPDistanceFactor', 'AllowReversalAfterMaxEntryHour', 'RearmCanceledReversalNextDay', 'Multiplicador base do range na TurnOf', 'Fator de distancia do SL na TurnOf', 'Fator de distancia do TP na TurnOf']
+                keys: [
+                    'EnableReversal', 'EnableTurnOf',
+                    'EnableOvernightReversal', 'EnableOvernightTurnOf',
+                    'ReversalMultiplier', 'Multiplicador base do range na TurnOf',
+                    'ReversalSLDistanceFactor', 'Fator de distancia do SL na TurnOf',
+                    'ReversalTPDistanceFactor', 'Fator de distancia do TP na TurnOf',
+                    'AllowReversalAfterMaxEntryHour', 'AllowTurnOfAfterMaxEntryHour',
+                    'RearmCanceledReversalNextDay', 'RearmCanceledTurnOfNextDay'
+                ]
             },
             {
                 title: 'Overnight',
-                keys: ['AllowTradeWithOvernight', 'KeepPositionsOvernight', 'CloseMinutesBeforeMarketClose']
+                keys: ['AllowTradeWithOvernight', 'KeepPositionsOvernight', 'KeepPositionsOverWeekend', 'CloseMinutesBeforeMarketClose']
             },
             {
                 title: 'Modo de Execucao',
@@ -327,12 +458,47 @@ class TradingDashboard {
                 keys: ['EnableNegativeAddOn', 'NegativeAddMaxEntries', 'NegativeAddTriggerPercent', 'NegativeAddLotMultiplier', 'NegativeAddUseSameSLTP', 'EnableNegativeAddTPAdjustment', 'NegativeAddTPDistancePercent', 'NegativeAddTPAdjustOnReversal', 'EnableNegativeAddDebugLogs', 'NegativeAddDebugIntervalSeconds']
             },
             {
-                title: 'Parametros de Estrategia PCM',
-                keys: ['EnablePCM', 'EnablePCMOnNoTradeLimitTarget', 'Habilitar PCM em NoTrade por LIMIT no alvo', 'Habilitar PCM em NoTrade por LIMIT no alvo (sem RR reduzido)', 'BreakEven', 'PCMBreakEven', 'Break even', 'PCMBreakEvenTriggerPercent', 'Gatilho Break even PCM (% da distancia ate TP)', 'TraillingStop', 'TrailingStop', 'Trailling stop', 'PCMTPReductionPercent', 'Reducao TP PCM (%)', 'PCMRiskPercent', 'Risco por operacao PCM (%)', 'PCMNegativeAddTPDistancePercent', 'Distancia TP apos ADON em PCM (% da dist. ate SL)', 'PCMChannelBars', 'PCMMaxOperationsPerDay', 'PCMIgnoreFirstEntryMaxHour', 'PCMReferenceTimeframe', 'PCMEnableSkipLargeCandle', 'PCMMaxCandlePoints', 'EnablePCMHourLimit', 'PCMEntryMaxHour', 'PCMEntryMaxMinute']
+                title: `Parametros de Estrategia ${secondaryOpLabel}`,
+                keys: [
+                    'EnablePCM', 'EnableRecontagem',
+                    'EnableSecondOp', 'EnableSecondOpOnNoTradeLimitTarget', 'EnableSecondOpOnFirstOpStopLoss',
+                    'EnablePCMOnNoTradeLimitTarget', 'EnableRecontagemOnNoTradeLimitTarget', 'EnableRecontagemOnFirstOpStopLoss',
+                    'Habilitar PCM em NoTrade por LIMIT no alvo', 'Habilitar Recontagem em NoTrade por LIMIT no alvo',
+                    'BreakEven', 'PCMBreakEven', 'Break even',
+                    'PCMBreakEvenTriggerPercent', 'RecontagemBreakEvenTriggerPercent',
+                    'Gatilho Break even PCM (% da distancia ate TP)', 'Gatilho Break even Recontagem (% da distancia ate TP)',
+                    'TraillingStop', 'TrailingStop', 'Trailling stop',
+                    'PCMTPReductionPercent', 'RecontagemTPReductionPercent', 'SecondOpTPReductionPercent',
+                    'Reducao TP PCM (%)', 'Reducao TP Recontagem (%)',
+                    'PCMRiskPercent', 'RecontagemRiskPercent', 'SecondOpRiskPercent',
+                    'Risco por operacao PCM (%)', 'Risco por operacao Recontagem (%)',
+                    'PCMNegativeAddTPDistancePercent', 'RecontagemNegativeAddTPDistancePercent', 'SecondOpNegativeAddTPDistancePercent',
+                    'Distancia TP apos ADON em PCM (% da dist. ate SL)', 'Distancia TP apos ADON em Recontagem (% da dist. ate SL)',
+                    'PCMUseMainChannelRangeParams', 'RecontagemUseMainChannelRangeParams', 'SecondOpUseMainChannelRangeParams',
+                    'PCMMinChannelRange', 'RecontagemMinChannelRange', 'SecondOpMinChannelRange',
+                    'PCMMaxChannelRange', 'RecontagemMaxChannelRange', 'SecondOpMaxChannelRange',
+                    'PCMSlicedThreshold', 'RecontagemSlicedThreshold', 'SecondOpSlicedThreshold',
+                    'PCMChannelBars', 'RecontagemChannelBars', 'SecondOpChannelBars',
+                    'PCMMaxNoTradeRecounts', 'RecontagemMaxNoTradeRecounts', 'SecondOpMaxNoTradeRecounts',
+                    'PCMMaxOperationsPerDay', 'RecontagemMaxOperationsPerDay', 'SecondOpMaxOperationsPerDay',
+                    'PCMIgnoreFirstEntryMaxHour', 'RecontagemIgnoreFirstEntryMaxHour', 'SecondOpIgnoreFirstEntryMaxHour',
+                    'PCMReferenceTimeframe', 'RecontagemReferenceTimeframe', 'SecondOpReferenceTimeframe',
+                    'PCMEnableSkipLargeCandle', 'RecontagemEnableSkipLargeCandle', 'SecondOpEnableSkipLargeCandle',
+                    'PCMMaxCandlePoints', 'RecontagemMaxCandlePoints', 'SecondOpMaxCandlePoints',
+                    'EnablePCMHourLimit', 'EnableRecontagemHourLimit', 'EnableSecondOpHourLimit',
+                    'PCMEntryMaxHour', 'RecontagemEntryMaxHour', 'SecondOpEntryMaxHour',
+                    'PCMEntryMaxMinute', 'RecontagemEntryMaxMinute', 'SecondOpEntryMaxMinute',
+                    'EnablePCMVerboseLogs', 'EnableRecontagemVerboseLogs', 'EnableSecondOpVerboseLogs',
+                    'PCMVerboseIntervalSeconds', 'RecontagemVerboseIntervalSeconds', 'SecondOpVerboseIntervalSeconds'
+                ]
             },
             {
                 title: 'Interface e Log',
                 keys: ['DrawChannels', 'EnableLogging', 'MagicNumber']
+            },
+            {
+                title: 'Parametros adicionais (nao mapeados)',
+                keys: []
             }
         ];
 
@@ -345,6 +511,7 @@ class TradingDashboard {
                 .replace(/Reversal/gi, 'TurnOf')
                 .replace(/AddOn/gi, 'ADON')
                 .replace(/addon/gi, 'ADON')
+                .replace(/PCM/gi, 'Recontagem')
                 .replace(/turnof/gi, 'TurnOf');
         };
 
@@ -372,16 +539,38 @@ class TradingDashboard {
             html += `</div>`;
         };
 
-        const turnOfGroup = groups.find((group) => group.title === 'TurnOf');
-        groups
-            .filter((group) => group.title !== 'TurnOf')
-            .forEach((group) => appendGroup(group.title, group.keys));
+        groups.forEach((group) => appendGroup(group.title, group.keys));
 
-        const remainingKeys = Object.keys(params).filter((k) => !renderedKeys.has(k));
-        const turnOfKeys = turnOfGroup ? [...turnOfGroup.keys, ...remainingKeys] : remainingKeys;
-        if (turnOfKeys.length > 0) {
-            appendGroup('TurnOf', turnOfKeys);
-        }
+        const fallbackByGroup = {};
+        const fallbackGroupOrder = groups.map((g) => g.title);
+        const classifyRemainingKey = (key) => {
+            const text = String(key || '');
+            if (/secondop|recontagem|pcm|break.?even|traill?ing/i.test(text)) return `Parametros de Estrategia ${secondaryOpLabel}`;
+            if (/reversal|turnof|virada/i.test(text)) return 'TurnOf';
+            if (/negativeadd|adon|addon/i.test(text)) return 'Adicao em Flutuacao Negativa';
+            if (/overnight|weekend|marketclose/i.test(text)) return 'Overnight';
+            if (/strictlimit|preferlimit|marketfallback|limit/i.test(text)) return 'Modo de Execucao';
+            if (/drawdown|risk|minriskreward|deposit|fixedlot|dd/i.test(text)) return 'Risco e Retorno';
+            if (/stoploss|tp|multiplier|sld|sliced/i.test(text)) return 'Parametros de Stop e TP';
+            if (/opening|entrymax|channel|range|tolerance|timeframe|fallback/i.test(text)) return 'Gatilho e Canal';
+            if (/drawchannels|enablelogging|magicnumber/i.test(text)) return 'Interface e Log';
+            return 'Parametros adicionais (nao mapeados)';
+        };
+
+        Object.keys(params)
+            .filter((k) => !renderedKeys.has(k))
+            .forEach((k) => {
+                const groupName = classifyRemainingKey(k);
+                if (!fallbackByGroup[groupName]) fallbackByGroup[groupName] = [];
+                fallbackByGroup[groupName].push(k);
+            });
+
+        fallbackGroupOrder.forEach((groupName) => {
+            const extraKeys = fallbackByGroup[groupName] || [];
+            if (extraKeys.length > 0) {
+                appendGroup(groupName, extraKeys);
+            }
+        });
 
         html += '</div>';
         container.innerHTML = html;
@@ -389,8 +578,10 @@ class TradingDashboard {
 
     renderSummaryCards() {
         const data = this.currentData;
+        const secondaryOpLabel = data.secondary_op_label || 'Recontagem';
+        this.setText('secondaryOpsCardLabel', secondaryOpLabel);
 
-        // Operacoes (First_op + Turnof) no card principal; Others mostra ADON/SLD/PCM
+        // Operacoes (First_op + Turnof) no card principal; Others mostra ADON/SLD/Recontagem
         const opSections = data.operations_card_sections || {};
         const firstSection = opSections.first_op || {};
         const slicedSection = opSections.sliced || {};
@@ -476,7 +667,7 @@ class TradingDashboard {
         
         document.getElementById('avgAdverseToSL').textContent = data.avg_adverse_to_sl || '-';
         
-        // Others (Addons + Sliced + PCM)
+        // Others (Addons + Sliced + Recontagem)
         const addonCount = this.parseIntSafe(addonSection.trades) || this.parseIntSafe(data.addon_only_total) || this.parseIntSafe(data.total_addons);
         const slicedCount = this.parseIntSafe(slicedSection.trades);
         const pcmCount = this.parseIntSafe(pcmSection.trades) || this.parseIntSafe(data.pcm_total);
@@ -905,6 +1096,19 @@ class TradingDashboard {
         this.renderTable('weekdayTable', weekdayData, [
             { key: 'weekday', label: 'Dia' },
             { key: 'trades', label: 'Trades' },
+            { key: 'win_rate', label: 'Win Rate' },
+            { key: 'net_profit', label: 'PnL', format: 'currency' },
+            { key: 'profit_factor', label: 'PF' }
+        ]);
+
+        // Weekday by Flag Analysis
+        const weekdayFlagData = this.currentData.weekday_flag_analysis || [];
+        this.renderTable('weekdayFlagTable', weekdayFlagData, [
+            { key: 'weekday', label: 'Dia' },
+            { key: 'flag', label: 'Flag' },
+            { key: 'trades', label: 'Trades' },
+            { key: 'tp', label: 'TP' },
+            { key: 'sl', label: 'SL' },
             { key: 'win_rate', label: 'Win Rate' },
             { key: 'net_profit', label: 'PnL', format: 'currency' },
             { key: 'profit_factor', label: 'PF' }
