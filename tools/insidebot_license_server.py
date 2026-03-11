@@ -107,6 +107,20 @@ def parse_expiry_utc(value) -> datetime:
     raise ValueError(f"unsupported expires_at format: {text}")
 
 
+def normalize_credential_text(value) -> str:
+    text = str(value or "")
+    # Defensive cleanup for hidden unicode/control chars that may come from browser autofill/copy-paste.
+    text = (
+        text.replace("\ufeff", "")
+        .replace("\u200b", "")
+        .replace("\u200c", "")
+        .replace("\u200d", "")
+        .replace("\u2060", "")
+    )
+    text = "".join(ch for ch in text if (ord(ch) >= 32 or ch in "\r\n\t"))
+    return text.strip()
+
+
 class LicenseStore:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
@@ -1097,17 +1111,17 @@ class LicenseHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._send_json(400, {"ok": False, "error": "invalid_json"})
                 return
-            username = str(payload.get("username", "")).strip()
-            password = str(payload.get("password", "")).strip()
-            expected_user = getattr(self.server, "admin_username", "admin")
-            expected_pass = getattr(self.server, "admin_password", "")
+            username = normalize_credential_text(payload.get("username", ""))
+            password = normalize_credential_text(payload.get("password", ""))
+            expected_user = normalize_credential_text(getattr(self.server, "admin_username", "admin")) or "admin"
+            expected_pass = normalize_credential_text(getattr(self.server, "admin_password", ""))
             if not expected_pass:
                 self._send_json(500, {"ok": False, "error": "admin_password_not_configured"})
                 return
             if not username:
                 username = expected_user
-            user_ok = username.lower() == str(expected_user).strip().lower()
-            pass_ok = password == str(expected_pass)
+            user_ok = username.lower() == expected_user.lower()
+            pass_ok = password == expected_pass
             if not user_ok or not pass_ok:
                 logging.warning(
                     "admin login denied user=%s payload_keys=%s ip=%s",

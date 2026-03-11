@@ -12,6 +12,13 @@ function setError(message) {
   $("errorText").textContent = message || "";
 }
 
+function normalizeCredential(value) {
+  return String(value ?? "")
+    .replace(/\uFEFF/g, "")
+    .replace(/[\u200B-\u200D\u2060]/g, "")
+    .trim();
+}
+
 function getBaseUrl() {
   return ($("baseUrl").value || window.location.origin).trim().replace(/\/+$/, "");
 }
@@ -74,9 +81,33 @@ async function testConnection() {
   }
 }
 
+async function authLogin(username, password) {
+  try {
+    return await fetchJson("/api/v1/admin/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch (err) {
+    const msg = String(err?.message || "").toLowerCase();
+    if (!msg.includes("invalid_credentials")) {
+      throw err;
+    }
+  }
+
+  const form = new URLSearchParams();
+  form.set("username", username);
+  form.set("password", password);
+  return await fetchJson("/api/v1/admin/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+}
+
 async function doLogin() {
-  const username = ($("username").value || "").trim() || "admin";
-  const password = ($("password").value || "").trim();
+  const username = normalizeCredential($("username").value || "") || "admin";
+  const password = normalizeCredential($("password").value || "");
   if (!password) {
     setError("Password is required.");
     return;
@@ -87,11 +118,7 @@ async function doLogin() {
   setStatus("Authenticating...");
 
   try {
-    const data = await fetchJson("/api/v1/admin/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    const data = await authLogin(username, password);
     setAuth(data.token || "", data.username || username);
     window.location.replace("/admin");
   } catch (err) {
