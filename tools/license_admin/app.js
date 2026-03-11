@@ -14,8 +14,12 @@ function toast(msg) {
   $("toast").textContent = `${new Date().toLocaleTimeString()} - ${msg}`;
 }
 
+function currentOriginBaseUrl() {
+  return window.location.origin.trim().replace(/\/+$/, "");
+}
+
 function getBaseUrl() {
-  return ($("baseUrl").value || window.location.origin).trim().replace(/\/+$/, "");
+  return currentOriginBaseUrl();
 }
 
 function getAuthToken() {
@@ -849,7 +853,10 @@ function bindEvents() {
 }
 
 function loadSavedConnection() {
-  $("baseUrl").value = localStorage.getItem(STORAGE_BASE_URL) || window.location.origin;
+  const origin = currentOriginBaseUrl();
+  localStorage.setItem(STORAGE_BASE_URL, origin);
+  $("baseUrl").value = origin;
+  $("baseUrl").setAttribute("readonly", "readonly");
   updateAuthState();
 }
 

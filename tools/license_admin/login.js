@@ -12,6 +12,10 @@ function setError(message) {
   $("errorText").textContent = message || "";
 }
 
+function currentOriginBaseUrl() {
+  return window.location.origin.trim().replace(/\/+$/, "");
+}
+
 function normalizeCredential(value) {
   return String(value ?? "")
     .replace(/\uFEFF/g, "")
@@ -20,11 +24,11 @@ function normalizeCredential(value) {
 }
 
 function getBaseUrl() {
-  return ($("baseUrl").value || window.location.origin).trim().replace(/\/+$/, "");
+  return currentOriginBaseUrl();
 }
 
 function saveBaseUrl() {
-  localStorage.setItem(STORAGE_BASE_URL, getBaseUrl());
+  localStorage.setItem(STORAGE_BASE_URL, currentOriginBaseUrl());
 }
 
 function getToken() {
@@ -150,7 +154,10 @@ function bindEvents() {
 }
 
 async function init() {
-  $("baseUrl").value = localStorage.getItem(STORAGE_BASE_URL) || window.location.origin;
+  const origin = currentOriginBaseUrl();
+  localStorage.setItem(STORAGE_BASE_URL, origin);
+  $("baseUrl").value = origin;
+  $("baseUrl").setAttribute("readonly", "readonly");
   $("username").value = localStorage.getItem(STORAGE_AUTH_USER) || "admin";
   bindEvents();
   explainReason();
