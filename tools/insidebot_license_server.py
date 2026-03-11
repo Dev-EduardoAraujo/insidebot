@@ -15,6 +15,7 @@ import secrets
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -850,7 +851,7 @@ class LicenseHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         logging.info("%s - %s", self.address_string(), fmt % args)
 
-    def _send_json(self, code: int, payload: dict):
+    def _send_json(self, code: int, payload: dict, extra_headers: dict = None):
         body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -858,6 +859,9 @@ class LicenseHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(str(key), str(value))
         self.end_headers()
         self.wfile.write(body)
 
@@ -980,6 +984,40 @@ class LicenseHandler(BaseHTTPRequestHandler):
             return ""
         return auth[7:].strip()
 
+    def _session_cookie_name(self):
+        return "insidebot_admin_session"
+
+    def _get_session_cookie_token(self):
+        raw_cookie = self.headers.get("Cookie", "")
+        if not raw_cookie:
+            return ""
+        try:
+            jar = cookies.SimpleCookie()
+            jar.load(raw_cookie)
+            entry = jar.get(self._session_cookie_name())
+            if entry is None:
+                return ""
+            return str(entry.value or "").strip()
+        except Exception:
+            return ""
+
+    def _is_https_request(self):
+        xfp = str(self.headers.get("X-Forwarded-Proto", "")).strip().lower()
+        return xfp == "https"
+
+    def _build_session_cookie(self, token: str, max_age: int = 0):
+        parts = [
+            f"{self._session_cookie_name()}={token}",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+        ]
+        if max_age is not None:
+            parts.append(f"Max-Age={int(max_age)}")
+        if self._is_https_request():
+            parts.append("Secure")
+        return "; ".join(parts)
+
     def _get_remote_ip(self):
         xff = self.headers.get("X-Forwarded-For", "").strip()
         if xff:
@@ -1001,6 +1039,10 @@ class LicenseHandler(BaseHTTPRequestHandler):
 
         bearer = self._get_bearer_token()
         if bearer and self.server.validate_session(bearer):
+            return True
+
+        cookie_token = self._get_session_cookie_token()
+        if cookie_token and self.server.validate_session(cookie_token):
             return True
         return False
 
@@ -1132,6 +1174,7 @@ class LicenseHandler(BaseHTTPRequestHandler):
                 self._send_json(401, {"ok": False, "error": "invalid_credentials"})
                 return
             token, expires_at = self.server.create_session(username)
+            cookie_value = self._build_session_cookie(token, max_age=getattr(self.server, "session_ttl_seconds", 43200))
             self._send_json(
                 200,
                 {
@@ -1140,6 +1183,7 @@ class LicenseHandler(BaseHTTPRequestHandler):
                     "username": username,
                     "expires_at": to_iso_utc(expires_at),
                 },
+                extra_headers={"Set-Cookie": cookie_value},
             )
             return
 
@@ -1147,7 +1191,14 @@ class LicenseHandler(BaseHTTPRequestHandler):
             token = self._get_bearer_token()
             if token:
                 self.server.revoke_session(token)
-            self._send_json(200, {"ok": True})
+            cookie_token = self._get_session_cookie_token()
+            if cookie_token:
+                self.server.revoke_session(cookie_token)
+            self._send_json(
+                200,
+                {"ok": True},
+                extra_headers={"Set-Cookie": self._build_session_cookie("", max_age=0)},
+            )
             return
 
         if path == "/api/v1/license/validate":

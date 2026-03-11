@@ -156,6 +156,7 @@ function computeSuspicious(events) {
 async function apiGet(path, useAdmin = true) {
   const resp = await fetch(`${getBaseUrl()}${path}`, {
     method: "GET",
+    credentials: "same-origin",
     headers: useAdmin ? adminHeaders() : {},
   });
   const data = await resp.json().catch(() => ({}));
@@ -169,6 +170,7 @@ async function apiGet(path, useAdmin = true) {
 async function apiPost(path, payload, useAdmin = true) {
   const resp = await fetch(`${getBaseUrl()}${path}`, {
     method: "POST",
+    credentials: "same-origin",
     headers: useAdmin ? adminHeaders() : { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
   });
@@ -204,13 +206,13 @@ async function logout() {
 }
 
 async function checkAuth() {
-  if (!getAuthToken()) {
-    redirectToLogin("missing_session");
-    return false;
-  }
   try {
     await apiGet("/api/v1/admin/auth/check", true);
-    updateAuthState();
+    if (getAuthToken()) {
+      updateAuthState();
+    } else {
+      $("authState").value = "Authenticated (cookie session)";
+    }
     return true;
   } catch (_) {
     setAuth("", "");

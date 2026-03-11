@@ -45,7 +45,8 @@ function setAuth(token, username) {
 }
 
 async function fetchJson(path, options = {}) {
-  const resp = await fetch(`${getBaseUrl()}${path}`, options);
+  const fetchOptions = { credentials: "same-origin", ...options };
+  const resp = await fetch(`${getBaseUrl()}${path}`, fetchOptions);
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok || data.ok === false) {
     throw new Error(data.error || data.message || `HTTP ${resp.status}`);
@@ -55,16 +56,16 @@ async function fetchJson(path, options = {}) {
 
 async function checkExistingSession() {
   const token = getToken();
-  if (!token) return false;
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
   try {
     await fetchJson("/api/v1/admin/auth/check", {
       method: "GET",
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
     });
     window.location.replace("/admin");
     return true;
   } catch (_) {
-    setAuth("", "");
+    if (token) setAuth("", "");
     return false;
   }
 }
