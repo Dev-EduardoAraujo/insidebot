@@ -12,29 +12,47 @@
       <h1>InsideBot License Admin</h1>
       <p class="muted">Autentique-se para acessar o painel em <code>/admin</code>.</p>
 
-      <label>
-        API Base URL
-        <input id="baseUrl" type="text" readonly />
-      </label>
-      <label>
-        Username
-        <input id="username" type="text" value="admin" />
-      </label>
-      <label>
-        Password
-        <input id="password" type="password" />
-      </label>
-
-      <div class="row wrap">
-        <button id="loginBtn" class="btn btn-primary">Login</button>
-        <button id="testConnBtn" class="btn">Test Connection</button>
-      </div>
+      <form method="post" action="/login">
+        <label>
+          Username
+          <input id="username" name="username" type="text" value="admin" autocomplete="username" />
+        </label>
+        <label>
+          Password
+          <input id="password" name="password" type="password" autocomplete="current-password" />
+        </label>
+        <div class="row wrap">
+          <button type="submit" class="btn btn-primary">Login</button>
+        </div>
+      </form>
 
       <p id="statusText" class="muted"></p>
-      <p id="errorText" class="error-text"></p>
+      <p id="errorText" class="error-text" aria-live="polite"></p>
     </section>
   </main>
 
-  <script src="/login/login.js?v=20260311d"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const error = params.get("error") || "";
+      const reason = params.get("reason") || "";
+      const statusEl = document.getElementById("statusText");
+      const errorEl = document.getElementById("errorText");
+      if (reason === "session_expired") {
+        statusEl.textContent = "Your session expired. Please login again.";
+      } else if (reason === "logged_out") {
+        statusEl.textContent = "You have been logged out.";
+      } else if (reason === "missing_session") {
+        statusEl.textContent = "Please login to continue.";
+      }
+      if (error === "invalid_credentials") {
+        errorEl.textContent = "Login failed: invalid_credentials";
+      } else if (error) {
+        errorEl.textContent = "Login failed: " + error;
+      }
+      const pass = document.getElementById("password");
+      if (pass) pass.focus();
+    })();
+  </script>
 </body>
 </html>

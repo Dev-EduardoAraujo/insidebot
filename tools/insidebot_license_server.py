@@ -873,16 +873,22 @@ class LicenseHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_binary(self, code: int, data: bytes, content_type: str):
+    def _send_binary(self, code: int, data: bytes, content_type: str, extra_headers: dict = None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(str(key), str(value))
         self.end_headers()
         self.wfile.write(data)
 
-    def _redirect(self, location: str, code: int = 302):
+    def _redirect(self, location: str, code: int = 302, extra_headers: dict = None):
         self.send_response(code)
         self.send_header("Location", location)
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(str(key), str(value))
         self.end_headers()
 
     @staticmethod
@@ -942,7 +948,14 @@ class LicenseHandler(BaseHTTPRequestHandler):
             content_type = "application/octet-stream"
 
         data = target.read_bytes()
-        self._send_binary(200, data, content_type)
+        cache_headers = {}
+        if target.name.lower() in {"index.html", "login.html"}:
+            cache_headers = {
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        self._send_binary(200, data, content_type, extra_headers=cache_headers)
 
     def _read_json(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -1146,6 +1159,37 @@ class LicenseHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if path in {"/login", "/login/"}:
+            try:
+                payload = self._read_login_payload()
+            except ValueError:
+                self._redirect("/login?error=invalid_payload")
+                return
+            username = normalize_credential_text(payload.get("username", ""))
+            password = normalize_credential_text(payload.get("password", ""))
+            expected_user = normalize_credential_text(getattr(self.server, "admin_username", "admin")) or "admin"
+            expected_pass = normalize_credential_text(getattr(self.server, "admin_password", ""))
+            if not expected_pass:
+                self._redirect("/login?error=admin_password_not_configured")
+                return
+            if not username:
+                username = expected_user
+            user_ok = username.lower() == expected_user.lower()
+            pass_ok = password == expected_pass
+            if not user_ok or not pass_ok:
+                logging.warning(
+                    "admin login denied user=%s payload_keys=%s ip=%s",
+                    username,
+                    ",".join(sorted([str(k) for k in payload.keys()])),
+                    self._get_remote_ip(),
+                )
+                self._redirect("/login?error=invalid_credentials")
+                return
+            token, _expires_at = self.server.create_session(username)
+            cookie_value = self._build_session_cookie(token, max_age=getattr(self.server, "session_ttl_seconds", 43200))
+            self._redirect("/admin", code=303, extra_headers={"Set-Cookie": cookie_value})
+            return
 
         if path == "/api/v1/admin/auth/login":
             try:
