@@ -198,11 +198,19 @@ class LicenseStore:
                     build TEXT,
                     operation_code TEXT,
                     operation_chain_code TEXT,
+                    event_type TEXT NOT NULL DEFAULT 'CLOSED',
+                    symbol TEXT,
+                    lot_size REAL NOT NULL DEFAULT 0,
+                    total_lots REAL NOT NULL DEFAULT 0,
                     result TEXT,
                     direction TEXT,
                     entry_time TEXT,
                     exit_time TEXT,
+                    entry_price REAL NOT NULL DEFAULT 0,
+                    exit_price REAL NOT NULL DEFAULT 0,
+                    profit_gross REAL NOT NULL DEFAULT 0,
                     profit_net REAL NOT NULL DEFAULT 0,
+                    account_currency TEXT,
                     payload_json TEXT NOT NULL,
                     remote_ip TEXT
                 )
@@ -219,6 +227,14 @@ class LicenseStore:
             self._ensure_column(conn, "licenses", "bound_login TEXT")
             self._ensure_column(conn, "licenses", "bound_server TEXT")
             self._ensure_column(conn, "licenses", "bound_ip TEXT")
+            self._ensure_column(conn, "trade_events", "event_type TEXT NOT NULL DEFAULT 'CLOSED'")
+            self._ensure_column(conn, "trade_events", "symbol TEXT")
+            self._ensure_column(conn, "trade_events", "lot_size REAL NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "trade_events", "total_lots REAL NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "trade_events", "entry_price REAL NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "trade_events", "exit_price REAL NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "trade_events", "profit_gross REAL NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "trade_events", "account_currency TEXT")
             conn.commit()
 
     @staticmethod
@@ -260,6 +276,24 @@ class LicenseStore:
             "bound_server": row["bound_server"],
             "bound_ip": row["bound_ip"],
         }
+
+    @staticmethod
+    def _safe_float(value, default=0.0):
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return float(default)
+
+    @staticmethod
+    def _extract_trade_payload(payload_json: str) -> dict:
+        if not payload_json:
+            return {}
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        trade = payload.get("trade")
+        return trade if isinstance(trade, dict) else {}
 
     def get_license(self, token: str):
         with self._connect() as conn:
@@ -485,22 +519,27 @@ class LicenseStore:
             "deleted": deleted,
         }
 
-    def list_trade_events(self, limit=200, offset=0, token=None):
+    def list_trade_events(self, limit=200, offset=0, token=None, symbol=None):
         limit = max(1, min(int(limit), 2000))
         offset = max(0, int(offset))
         params = []
-        where = ""
+        clauses = []
         if token:
-            where = "WHERE token LIKE ?"
+            clauses.append("token LIKE ?")
             params.append(f"%{token}%")
+        if symbol:
+            clauses.append("symbol LIKE ?")
+            params.append(f"%{symbol}%")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
         with self._connect() as conn:
             total = conn.execute(f"SELECT COUNT(*) AS c FROM trade_events {where}", params).fetchone()["c"]
             rows = conn.execute(
                 f"""
                 SELECT id, token, event_time, login, server, company, account_name, program, build,
-                       operation_code, operation_chain_code, result, direction,
-                       entry_time, exit_time, profit_net, remote_ip
+                       operation_code, operation_chain_code, event_type, symbol, lot_size, total_lots,
+                       result, direction, entry_time, exit_time, entry_price, exit_price,
+                       profit_gross, profit_net, account_currency, payload_json, remote_ip
                 FROM trade_events
                 {where}
                 ORDER BY id DESC
@@ -511,6 +550,18 @@ class LicenseStore:
 
         items = []
         for row in rows:
+            trade_payload = self._extract_trade_payload(row["payload_json"])
+            event_type = str(row["event_type"] or trade_payload.get("event_type") or "CLOSED").strip().upper() or "CLOSED"
+            trade_symbol = str(row["symbol"] or trade_payload.get("symbol") or "").strip()
+            lot_size = self._safe_float(row["lot_size"], trade_payload.get("lot_size", 0.0))
+            total_lots = self._safe_float(row["total_lots"], trade_payload.get("total_lots", 0.0))
+            if total_lots <= 0.0 and lot_size > 0.0:
+                total_lots = lot_size
+            entry_price = self._safe_float(row["entry_price"], trade_payload.get("entry_price", 0.0))
+            exit_price = self._safe_float(row["exit_price"], trade_payload.get("exit_price", 0.0))
+            profit_gross = self._safe_float(row["profit_gross"], trade_payload.get("profit_gross", 0.0))
+            profit_net = self._safe_float(row["profit_net"], trade_payload.get("profit_net", 0.0))
+            account_currency = str(row["account_currency"] or trade_payload.get("account_currency") or "").strip()
             items.append(
                 {
                     "id": row["id"],
@@ -524,11 +575,19 @@ class LicenseStore:
                     "build": row["build"],
                     "operation_code": row["operation_code"],
                     "operation_chain_code": row["operation_chain_code"],
+                    "event_type": event_type,
+                    "symbol": trade_symbol,
+                    "lot_size": lot_size,
+                    "total_lots": total_lots,
                     "result": row["result"],
                     "direction": row["direction"],
                     "entry_time": row["entry_time"],
                     "exit_time": row["exit_time"],
-                    "profit_net": float(row["profit_net"] or 0.0),
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "profit_gross": profit_gross,
+                    "profit_net": profit_net,
+                    "account_currency": account_currency,
                     "remote_ip": row["remote_ip"],
                 }
             )
@@ -590,23 +649,32 @@ class LicenseStore:
 
         operation_code = str(trade.get("operation_code", "")).strip()
         operation_chain_code = str(trade.get("operation_chain_code", "")).strip()
+        event_type = str(trade.get("event_type", "CLOSED") or "CLOSED").strip().upper() or "CLOSED"
+        symbol = str(trade.get("symbol", "")).strip()
+        lot_size = self._safe_float(trade.get("lot_size", 0.0))
+        total_lots = self._safe_float(trade.get("total_lots", 0.0))
         result = str(trade.get("result", "")).strip()
         direction = str(trade.get("direction", "")).strip()
         entry_time = str(trade.get("entry_time", "")).strip()
         exit_time = str(trade.get("exit_time", "")).strip()
+        entry_price = self._safe_float(trade.get("entry_price", 0.0))
+        exit_price = self._safe_float(trade.get("exit_price", 0.0))
+        profit_gross = self._safe_float(trade.get("profit_gross", 0.0))
         try:
             profit_net = float(trade.get("profit_net", 0.0) or 0.0)
         except (TypeError, ValueError):
             profit_net = 0.0
+        account_currency = str(trade.get("account_currency", "")).strip()
 
         with self._write_lock, self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO trade_events(
                     token, event_time, login, server, company, account_name, program, build,
-                    operation_code, operation_chain_code, result, direction, entry_time, exit_time,
-                    profit_net, payload_json, remote_ip
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    operation_code, operation_chain_code, event_type, symbol, lot_size, total_lots,
+                    result, direction, entry_time, exit_time, entry_price, exit_price,
+                    profit_gross, profit_net, account_currency, payload_json, remote_ip
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     token,
@@ -619,11 +687,19 @@ class LicenseStore:
                     build,
                     operation_code,
                     operation_chain_code,
+                    event_type,
+                    symbol,
+                    lot_size,
+                    total_lots,
                     result,
                     direction,
                     entry_time,
                     exit_time,
+                    entry_price,
+                    exit_price,
+                    profit_gross,
                     profit_net,
+                    account_currency,
                     json.dumps(payload, ensure_ascii=True),
                     remote_ip,
                 ),
@@ -1144,7 +1220,8 @@ class LicenseHandler(BaseHTTPRequestHandler):
             limit = int(query.get("limit", ["200"])[0])
             offset = int(query.get("offset", ["0"])[0])
             token = query.get("token", [""])[0].strip() or None
-            result = self.server.store.list_trade_events(limit=limit, offset=offset, token=token)
+            symbol = query.get("symbol", [""])[0].strip() or None
+            result = self.server.store.list_trade_events(limit=limit, offset=offset, token=token, symbol=symbol)
             self._send_json(200, {"ok": True, **result})
             return
 

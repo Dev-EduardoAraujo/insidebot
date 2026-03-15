@@ -2,6 +2,7 @@
 class TradingDashboard {
     constructor() {
         this.currentData = null;
+        this.reports = [];
         this.monthlyChart = null;
         this.chartBarScale = 1.0;
         this.chartWheelHandler = null;
@@ -20,10 +21,39 @@ class TradingDashboard {
         });
 
         document.getElementById('selectReport').addEventListener('change', (e) => {
+            this.updateReportActionsState();
             if (e.target.value) {
                 this.loadReport(e.target.value);
             }
         });
+
+        const renameBtn = document.getElementById('btnRenameReport');
+        if (renameBtn) {
+            renameBtn.addEventListener('click', () => {
+                this.renameSelectedReport();
+            });
+        }
+
+        const deleteBtn = document.getElementById('btnDeleteReport');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', () => {
+                this.deleteSelectedReport();
+            });
+        }
+
+        const assetSelect = document.getElementById('selectAsset');
+        if (assetSelect) {
+            assetSelect.addEventListener('change', () => {
+                this.populateReportOptions();
+            });
+        }
+
+        const balanceSelect = document.getElementById('selectInitialBalance');
+        if (balanceSelect) {
+            balanceSelect.addEventListener('change', () => {
+                this.populateReportOptions();
+            });
+        }
 
         const granularitySelect = document.getElementById('chartGranularity');
         if (granularitySelect) {
@@ -49,21 +79,231 @@ class TradingDashboard {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const reports = await response.json();
-            
-            const select = document.getElementById('selectReport');
-            select.innerHTML = '<option value="">Selecione um relatorio...</option>';
-            
-            reports.forEach(report => {
-                const option = document.createElement('option');
-                option.value = report.path;
-                option.textContent = report.name;
-                select.appendChild(option);
-            });
+            this.reports = Array.isArray(reports) ? reports : [];
+            this.populateReportFilters();
+            this.populateReportOptions();
             
             console.log(`Loaded ${reports.length} reports`);
         } catch (error) {
             console.error('Erro ao carregar lista de relatorios:', error);
             alert('Erro ao carregar relatorios. Verifique o console.');
+        }
+    }
+
+    populateReportFilters() {
+        const assetSelect = document.getElementById('selectAsset');
+        const balanceSelect = document.getElementById('selectInitialBalance');
+        if (!assetSelect || !balanceSelect) return;
+
+        const selectedAsset = assetSelect.value || '';
+        const selectedBalance = balanceSelect.value || '';
+
+        const assets = [...new Set(this.reports.map((r) => String(r.asset || 'ROOT')))].sort();
+        const balances = [...new Set(this.reports.map((r) => String(r.initial_balance || 'ROOT')))].sort((a, b) => {
+            const aNum = parseFloat(String(a).replace(/[^0-9.]/g, ''));
+            const bNum = parseFloat(String(b).replace(/[^0-9.]/g, ''));
+            if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aNum !== bNum) return aNum - bNum;
+            return String(a).localeCompare(String(b));
+        });
+
+        assetSelect.innerHTML = '<option value="">Ativo: todos</option>';
+        assets.forEach((asset) => {
+            const option = document.createElement('option');
+            option.value = asset;
+            option.textContent = asset;
+            assetSelect.appendChild(option);
+        });
+
+        balanceSelect.innerHTML = '<option value="">Saldo inicial: todos</option>';
+        balances.forEach((balance) => {
+            const option = document.createElement('option');
+            option.value = balance;
+            option.textContent = balance;
+            balanceSelect.appendChild(option);
+        });
+
+        if (selectedAsset && assets.includes(selectedAsset)) {
+            assetSelect.value = selectedAsset;
+        }
+        if (selectedBalance && balances.includes(selectedBalance)) {
+            balanceSelect.value = selectedBalance;
+        }
+    }
+
+    getFilteredReports() {
+        const asset = (document.getElementById('selectAsset')?.value || '').trim();
+        const balance = (document.getElementById('selectInitialBalance')?.value || '').trim();
+
+        return this.reports.filter((report) => {
+            const reportAsset = String(report.asset || 'ROOT');
+            const reportBalance = String(report.initial_balance || 'ROOT');
+            if (asset && reportAsset !== asset) return false;
+            if (balance && reportBalance !== balance) return false;
+            return true;
+        });
+    }
+
+    populateReportOptions() {
+        const select = document.getElementById('selectReport');
+        if (!select) return;
+
+        const previousValue = select.value || '';
+        const filteredReports = this.getFilteredReports();
+        select.innerHTML = '<option value="">Selecione um relatorio...</option>';
+
+        filteredReports.forEach((report) => {
+            const option = document.createElement('option');
+            option.value = report.path;
+            option.textContent = report.relative_path || report.name || report.path;
+            select.appendChild(option);
+        });
+
+        const canRestorePrevious = filteredReports.some((r) => r.path === previousValue);
+        if (canRestorePrevious) {
+            select.value = previousValue;
+        }
+        this.updateReportActionsState();
+    }
+
+    updateReportActionsState() {
+        const select = document.getElementById('selectReport');
+        const hasSelection = !!(select && select.value);
+        const renameBtn = document.getElementById('btnRenameReport');
+        const deleteBtn = document.getElementById('btnDeleteReport');
+        if (renameBtn) renameBtn.disabled = !hasSelection;
+        if (deleteBtn) deleteBtn.disabled = !hasSelection;
+    }
+
+    getSelectedReportPath() {
+        const select = document.getElementById('selectReport');
+        if (!select || !select.value) return '';
+        return select.value;
+    }
+
+    getSelectedReportName() {
+        const select = document.getElementById('selectReport');
+        if (!select || select.selectedIndex < 0) return '';
+        const option = select.options[select.selectedIndex];
+        const label = option ? (option.textContent || option.value || '') : '';
+        return this.extractFileName(label);
+    }
+
+    extractFileName(pathText) {
+        const text = String(pathText || '').trim();
+        if (!text) return '';
+        const parts = text.split(/[\\/]/);
+        return parts[parts.length - 1] || '';
+    }
+
+    async apiPost(url, payload) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {})
+        });
+        let data = null;
+        try {
+            data = await response.json();
+        } catch (_) {
+            data = null;
+        }
+        if (!response.ok) {
+            const error = new Error((data && data.error) ? data.error : `http_${response.status}`);
+            error.status = response.status;
+            error.payload = data;
+            throw error;
+        }
+        return data || {};
+    }
+
+    formatReportActionError(action, error) {
+        const code = String((error && error.message) || '').trim();
+        const map = {
+            report_not_found: 'Relatorio nao encontrado.',
+            missing_new_name: 'Informe o novo nome do relatorio.',
+            invalid_new_name: 'Nome invalido. Use apenas o nome do arquivo.',
+            invalid_target_path: 'Destino invalido.',
+            target_exists: 'Ja existe um arquivo com esse nome.',
+            invalid_json: 'Payload invalido enviado ao servidor.'
+        };
+        const msg = map[code] || `Falha ao ${action} relatorio (${code || 'erro_desconhecido'}).`;
+        return msg;
+    }
+
+    async renameSelectedReport() {
+        const selectedPath = this.getSelectedReportPath();
+        if (!selectedPath) {
+            alert('Selecione um relatorio para renomear.');
+            return;
+        }
+
+        const currentName = this.getSelectedReportName() || this.extractFileName(selectedPath);
+        const newNameRaw = window.prompt('Novo nome do relatorio (.md opcional):', currentName);
+        if (newNameRaw === null) return;
+
+        const newName = String(newNameRaw || '').trim();
+        if (!newName) {
+            alert('Nome invalido.');
+            return;
+        }
+
+        try {
+            const result = await this.apiPost('/api/report/rename', {
+                path: selectedPath,
+                new_name: newName
+            });
+
+            await this.loadReportsList();
+            const select = document.getElementById('selectReport');
+            const newPath = (result && result.report && result.report.path) ? result.report.path : '';
+            const hasNewPath = newPath && Array.from(select.options).some((opt) => opt.value === newPath);
+
+            if (hasNewPath) {
+                select.value = newPath;
+                this.updateReportActionsState();
+                await this.loadReport(newPath);
+            }
+
+            alert('Relatorio renomeado com sucesso.');
+        } catch (error) {
+            console.error('Erro ao renomear relatorio:', error);
+            alert(this.formatReportActionError('renomear', error));
+        }
+    }
+
+    async deleteSelectedReport() {
+        const selectedPath = this.getSelectedReportPath();
+        if (!selectedPath) {
+            alert('Selecione um relatorio para excluir.');
+            return;
+        }
+
+        const reportName = this.getSelectedReportName() || this.extractFileName(selectedPath);
+        const firstConfirm = window.confirm(`Excluir relatorio "${reportName}"?`);
+        if (!firstConfirm) return;
+        const secondConfirm = window.confirm('Confirmar exclusao definitiva do arquivo?');
+        if (!secondConfirm) return;
+
+        try {
+            await this.apiPost('/api/report/delete', { path: selectedPath });
+
+            await this.loadReportsList();
+            const select = document.getElementById('selectReport');
+            const firstReportOption = Array.from(select.options).find((opt) => !!opt.value);
+            if (firstReportOption) {
+                select.value = firstReportOption.value;
+                this.updateReportActionsState();
+                await this.loadReport(firstReportOption.value);
+            } else {
+                select.value = '';
+                this.updateReportActionsState();
+                this.currentData = null;
+            }
+
+            alert('Relatorio excluido com sucesso.');
+        } catch (error) {
+            console.error('Erro ao excluir relatorio:', error);
+            alert(this.formatReportActionError('excluir', error));
         }
     }
 

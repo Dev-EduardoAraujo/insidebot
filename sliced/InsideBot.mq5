@@ -8,7 +8,9 @@
 
 #include <Trade/Trade.mqh>
 CTrade trade;
-const bool g_releaseInfoLogsEnabled = false; // release: nunca expor logs de estrategia
+const bool g_releaseInfoLogsEnabled = false; // release: nunca expor logs gerais de estrategia
+#define REVERSAL_LOG Print
+#define NEGATIVE_ADD_LOG Print
 
 enum EDrawdownPercentReference
 {
@@ -30,7 +32,7 @@ int      OpeningMinute = 0;           // Horario de abertura (minuto)
 int      FirstEntryMaxHour = 16;      // Horario limite para primeira entrada do dia (hora)
 int      MaxEntryHour = 16;           // Horario limite para entrada (hora)
 ENUM_TIMEFRAMES ChannelTimeframe = PERIOD_M5;  // Timeframe do canal de abertura
-bool     EnableM15Fallback = true;    // Usar M15 se M5 < range minimo
+bool     EnableM15Fallback = false;   // Usar M15 se M5 < range minimo
 double   MinChannelRange = 2.5;       // Range minimo do canal
 double   MaxChannelRange = 14.99;     // Range maximo do canal (para projecao)
 double   SlicedThreshold = 15.0;      // Range para modo sliced (CA = C1)
@@ -40,47 +42,47 @@ double   TPMultiplier = 2.0;          // Multiplicador do TP
 double   TPReductionPercent = 10.0;   // Reducao do TP (%)
 double   SlicedMultiplier = 1.0;     // Multiplicador TP/SL no modo sliced
 double   RiskPercent = 0.7;           // Risco por operacao (%)
-bool     UseInitialDepositForRisk = true; // Usar deposito inicial da conta como base fixa do risco
-double   InitialDepositReference = 200000.0; // Deposito inicial de referencia
+bool     UseInitialDepositForRisk = false; // Usar deposito inicial da conta como base fixa do risco
+double   InitialDepositReference = 0.0; // Deposito inicial de referencia
 double   FixedLotAllEntries = 0.0;    // Lote fixo para first/turnof/add-on (0 usa risco dinamico)
 double   MinRiskReward = 0.85;        // RR minimo para entrada
-EDrawdownPercentReference DrawdownPercentReference = DD_REF_INITIAL_DEPOSIT; // Base de referencia para DD percentual
+EDrawdownPercentReference DrawdownPercentReference = DD_REF_DAY_BALANCE; // Base de referencia para DD percentual
 bool     ForceDayBalanceDDWhenUnderInitialDeposit = true; // Forcar base DD no saldo do dia se saldo inicio dia < deposito inicial
-double   MaxDailyDrawdownPercent = 3.6; // Limite de DD diario em % (0 desativa)
+double   MaxDailyDrawdownPercent = 4.0; // Limite de DD diario em % (0 desativa)
 double   MaxDrawdownPercent = 8.0;      // Limite de DD maximo em % (0 desativa)
-double   MaxDailyDrawdownAmount = 7200.0;  // Limite de DD diario absoluto (0 desativa)
-double   MaxDrawdownAmount = 16000.0;       // Limite de DD maximo absoluto (0 desativa)
-bool     EnableVerboseDDLogs = false;    // Logs verbosos de DD/DD+LIMIT
+double   MaxDailyDrawdownAmount = 0.0;  // Limite de DD diario absoluto (0 desativa)
+double   MaxDrawdownAmount = 0.0;       // Limite de DD maximo absoluto (0 desativa)
+bool     EnableVerboseDDLogs = true;    // Logs verbosos de DD/DD+LIMIT
 int      DDVerboseLogIntervalSeconds = 60; // Intervalo minimo entre logs verbosos de DD
 bool     EnableReversal = true;       // Habilitar turnof
 bool     EnableOvernightReversal = true;  // Habilitar turnof para fechamento overnight em SL
 double   ReversalMultiplier = 1.0;    // Multiplicador do range na turnof
 double   ReversalSLDistanceFactor = 3.0; // Fator da distancia do SL na turnof (x sobre multiplicador base)
 double   ReversalTPDistanceFactor = 2.8; // Fator da distancia do TP na turnof (x sobre multiplicador base)
-bool     AllowReversalAfterMaxEntryHour = true; // Permitir turnof apos horario limite de entrada
+bool     AllowReversalAfterMaxEntryHour = false; // Permitir turnof apos horario limite de entrada
 bool     RearmCanceledReversalNextDay = false;   // Rearmar virada cancelada por horario no dia seguinte
 bool     EnablePCM = false;            // Habilitar estrategia PCM
-bool     EnablePCMOnNoTradeLimitTarget = true; // Habilitar PCM em NoTrade quando LIMIT cancela por alvo projetado
-int      PCMMaxOperationsPerDay = 2;   // Maximo de operacoes PCM por dia
+bool     EnablePCMOnNoTradeLimitTarget = false; // Habilitar PCM em NoTrade quando LIMIT cancela por alvo projetado
+int      PCMMaxOperationsPerDay = 1;   // Maximo de operacoes PCM por dia
 bool     PCMIgnoreFirstEntryMaxHour = false; // Permitir entrada PCM apos o horario limite da primeira entrada
-bool     EnablePCMHourLimit = true;   // Habilitar horario limite especifico para entrada PCM
-int      PCMEntryMaxHour = 15;         // Hora limite para entrada PCM
-int      PCMEntryMaxMinute = 30;       // Minuto limite para entrada PCM
+bool     EnablePCMHourLimit = false;  // Habilitar horario limite especifico para entrada PCM
+int      PCMEntryMaxHour = 23;         // Hora limite para entrada PCM
+int      PCMEntryMaxMinute = 59;       // Minuto limite para entrada PCM
 bool     PCMUseMainChannelRangeParams = true; // Usar parametros de range do bloco Gatilho e Canal
-double   PCMMinChannelRange = 2.0;     // Range minimo do canal para PCM (quando nao usar parametros principais)
-double   PCMMaxChannelRange = 7.49;   // Range maximo do canal para PCM (quando nao usar parametros principais)
-double   PCMSlicedThreshold = 7.5;    // Threshold de SLD para PCM (quando nao usar parametros principais)
+double   PCMMinChannelRange = 0.0;     // Range minimo do canal para PCM (quando nao usar parametros principais)
+double   PCMMaxChannelRange = 0.0;    // Range maximo do canal para PCM (quando nao usar parametros principais)
+double   PCMSlicedThreshold = 0.0;    // Threshold de SLD para PCM (quando nao usar parametros principais)
 int      PCMChannelBars = 4;           // Quantidade de velas para recalcular o canal a partir do candle do TP
 ENUM_TIMEFRAMES PCMReferenceTimeframe = PERIOD_M5; // Timeframe de referencia do PCM (M1/M5/M15)
 bool     PCMEnableSkipLargeCandle = false; // Reiniciar contagem se candle exceder o limite em pontos
-double   PCMMaxCandlePoints = 1000.0;     // Limite maximo do range de candle em pontos para contagem PCM (0 desativa)
-double   PCMRiskPercent = 2.5;         // Risco por operacao (%) para entrada PCM
+double   PCMMaxCandlePoints = 0.0;        // Limite maximo do range de candle em pontos para contagem PCM (0 desativa)
+double   PCMRiskPercent = 1.0;         // Risco por operacao (%) para entrada PCM
 double   PCMTPReductionPercent = 10.0; // Reducao do TP (%) somente para PCM
 double   PCMNegativeAddTPDistancePercent = 100.0; // Distancia TP apos ADON em PCM (% da dist. da entrada media ate o SL)
 bool     BreakEven = false;            // Break even
-double   PCMBreakEvenTriggerPercent = 80.0; // Percentual da distancia ate TP para ativar break even
+double   PCMBreakEvenTriggerPercent = 50.0; // Percentual da distancia ate TP para ativar break even
 bool     TraillingStop = false;        // Trailling stop
-bool     EnablePCMVerboseLogs = false;  // Logs verbosos de diagnostico PCM (pode reduzir performance)
+bool     EnablePCMVerboseLogs = true;   // Logs verbosos de diagnostico PCM (pode reduzir performance)
 int      PCMVerboseIntervalSeconds = 60; // Intervalo minimo entre logs repetitivos do PCM (segundos)
 bool     AllowTradeWithOvernight = true;  // Permitir novas operacoes com posicao overnight
 bool     KeepPositionsOvernight = true;   // Manter posicoes abertas overnight
@@ -101,11 +103,11 @@ bool     NegativeAddUseSameSLTP = true;    // Usar mesmo SL/TP da operacao princ
 bool     EnableNegativeAddTPAdjustment = true;  // Ajustar TP de todas as posicoes apos addon
 double   NegativeAddTPDistancePercent = 100.0;  // Novo TP em % da distancia da entrada media ate o SL
 bool     NegativeAddTPAdjustOnReversal = false; // Ajustar TP apos addon tambem em operacoes de virada
-bool     EnableNegativeAddDebugLogs = false; // Gerar logs de diagnostico da adicao negativa
+bool     EnableNegativeAddDebugLogs = true; // Gerar logs de diagnostico da adicao negativa
 int      NegativeAddDebugIntervalSeconds = 60; // Intervalo minimo para repetir log igual (seg)
 bool     DrawChannels = false;         // Desenhar canais no grafico
-bool     EnableLogging = false;        // Gerar arquivo de log JSON
-ulong    MagicNumber = 100326;        // Numero magico
+bool     EnableLogging = true;         // Gerar arquivo de log JSON
+ulong    MagicNumber = 654321;         // Numero magico
 bool     EnableLicenseValidation = true;
 string   LicenseServerBaseUrl = "https://insidebotcontrol.com.br";
 string   LicenseToken = "italo";
@@ -410,6 +412,8 @@ void SendTradeEventToServer(string operationCode,
                             string directionText,
                             datetime entryTime,
                             datetime exitTime,
+                            double lotSize,
+                            double totalLots,
                             double entryPrice,
                             double exitPrice,
                             double stopLoss,
@@ -639,6 +643,8 @@ void SendTradeEventToServer(string operationCode,
                             string directionText,
                             datetime entryTime,
                             datetime exitTime,
+                            double lotSize,
+                            double totalLots,
                             double entryPrice,
                             double exitPrice,
                             double stopLoss,
@@ -680,6 +686,7 @@ void SendTradeEventToServer(string operationCode,
    string accountServer = AccountInfoString(ACCOUNT_SERVER);
    string accountCompany = AccountInfoString(ACCOUNT_COMPANY);
    string accountName = AccountInfoString(ACCOUNT_NAME);
+   string accountCurrency = AccountInfoString(ACCOUNT_CURRENCY);
    string programName = g_programName;
    string buildText = IntegerToString((int)TerminalInfoInteger(TERMINAL_BUILD));
 
@@ -692,6 +699,11 @@ void SendTradeEventToServer(string operationCode,
    payload += "\"program\":\"" + JsonEscape(programName) + "\",";
    payload += "\"build\":\"" + JsonEscape(buildText) + "\",";
    payload += "\"trade\":{";
+   payload += "\"event_type\":\"CLOSED\",";
+   payload += "\"symbol\":\"" + JsonEscape(_Symbol) + "\",";
+   payload += "\"lot_size\":" + DoubleToString(lotSize, 6) + ",";
+   payload += "\"total_lots\":" + DoubleToString(totalLots, 6) + ",";
+   payload += "\"account_currency\":\"" + JsonEscape(accountCurrency) + "\",";
    payload += "\"operation_code\":\"" + JsonEscape(operationCode) + "\",";
    payload += "\"operation_chain_code\":\"" + JsonEscape(operationChainCode) + "\",";
    payload += "\"result\":\"" + JsonEscape(resultCode) + "\",";
@@ -1321,26 +1333,26 @@ bool ValidateTradePermissions(string context, bool isClosingAction = false)
 {
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: trading bloqueado no terminal. contexto=", context);
+      Print("WARN: trading bloqueado no terminal. contexto=", context);
       return false;
    }
 
    if(!AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: trading bloqueado na conta. contexto=", context);
+      Print("WARN: trading bloqueado na conta. contexto=", context);
       return false;
    }
 
    long tradeMode = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
    if(tradeMode == SYMBOL_TRADE_MODE_DISABLED)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: simbolo com trade mode desabilitado. contexto=", context);
+      Print("WARN: simbolo com trade mode desabilitado. contexto=", context);
       return false;
    }
 
    if(!isClosingAction && tradeMode == SYMBOL_TRADE_MODE_CLOSEONLY)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: simbolo em close-only; novas entradas bloqueadas. contexto=", context);
+      Print("WARN: simbolo em close-only; novas entradas bloqueadas. contexto=", context);
       return false;
    }
 
@@ -1436,7 +1448,7 @@ bool ValidateBrokerLevelsForOrderSend(ENUM_ORDER_TYPE orderType,
    {
       if(stopLoss > 0.0 && (entryPrice - stopLoss) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: bloqueio broker (SL muito proximo). contexto=", context,
+         Print("WARN: bloqueio broker (SL muito proximo). contexto=", context,
                " | min_dist=", DoubleToString(minDistance, 5),
                " | entry=", DoubleToString(entryPrice, 5),
                " | sl=", DoubleToString(stopLoss, 5));
@@ -1444,7 +1456,7 @@ bool ValidateBrokerLevelsForOrderSend(ENUM_ORDER_TYPE orderType,
       }
       if(takeProfit > 0.0 && (takeProfit - entryPrice) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: bloqueio broker (TP muito proximo). contexto=", context,
+         Print("WARN: bloqueio broker (TP muito proximo). contexto=", context,
                " | min_dist=", DoubleToString(minDistance, 5),
                " | entry=", DoubleToString(entryPrice, 5),
                " | tp=", DoubleToString(takeProfit, 5));
@@ -1455,7 +1467,7 @@ bool ValidateBrokerLevelsForOrderSend(ENUM_ORDER_TYPE orderType,
    {
       if(stopLoss > 0.0 && (stopLoss - entryPrice) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: bloqueio broker (SL muito proximo). contexto=", context,
+         Print("WARN: bloqueio broker (SL muito proximo). contexto=", context,
                " | min_dist=", DoubleToString(minDistance, 5),
                " | entry=", DoubleToString(entryPrice, 5),
                " | sl=", DoubleToString(stopLoss, 5));
@@ -1463,7 +1475,7 @@ bool ValidateBrokerLevelsForOrderSend(ENUM_ORDER_TYPE orderType,
       }
       if(takeProfit > 0.0 && (entryPrice - takeProfit) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: bloqueio broker (TP muito proximo). contexto=", context,
+         Print("WARN: bloqueio broker (TP muito proximo). contexto=", context,
                " | min_dist=", DoubleToString(minDistance, 5),
                " | entry=", DoubleToString(entryPrice, 5),
                " | tp=", DoubleToString(takeProfit, 5));
@@ -1478,7 +1490,7 @@ bool ValidateBrokerLevelsForOrderSend(ENUM_ORDER_TYPE orderType,
                            : SymbolInfoDouble(_Symbol, SYMBOL_BID);
       if(MathAbs(marketPrice - entryPrice) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: bloqueio broker (entrada pendente muito proxima do mercado). contexto=", context,
+         Print("WARN: bloqueio broker (entrada pendente muito proxima do mercado). contexto=", context,
                " | min_dist=", DoubleToString(minDistance, 5),
                " | market=", DoubleToString(marketPrice, 5),
                " | entry=", DoubleToString(entryPrice, 5));
@@ -1512,7 +1524,7 @@ bool ValidateBrokerLevelsForPositionModify(ENUM_ORDER_TYPE orderType,
    {
       if(stopLoss > 0.0 && (referencePrice - stopLoss) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: modify bloqueado (SL perto do preco/freeze). contexto=", context,
+         Print("WARN: modify bloqueado (SL perto do preco/freeze). contexto=", context,
                " | ref=", DoubleToString(referencePrice, 5),
                " | sl=", DoubleToString(stopLoss, 5),
                " | min_dist=", DoubleToString(minDistance, 5));
@@ -1520,7 +1532,7 @@ bool ValidateBrokerLevelsForPositionModify(ENUM_ORDER_TYPE orderType,
       }
       if(takeProfit > 0.0 && (takeProfit - referencePrice) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: modify bloqueado (TP perto do preco/freeze). contexto=", context,
+         Print("WARN: modify bloqueado (TP perto do preco/freeze). contexto=", context,
                " | ref=", DoubleToString(referencePrice, 5),
                " | tp=", DoubleToString(takeProfit, 5),
                " | min_dist=", DoubleToString(minDistance, 5));
@@ -1533,7 +1545,7 @@ bool ValidateBrokerLevelsForPositionModify(ENUM_ORDER_TYPE orderType,
    {
       if(stopLoss > 0.0 && (stopLoss - referencePrice) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: modify bloqueado (SL perto do preco/freeze). contexto=", context,
+         Print("WARN: modify bloqueado (SL perto do preco/freeze). contexto=", context,
                " | ref=", DoubleToString(referencePrice, 5),
                " | sl=", DoubleToString(stopLoss, 5),
                " | min_dist=", DoubleToString(minDistance, 5));
@@ -1541,7 +1553,7 @@ bool ValidateBrokerLevelsForPositionModify(ENUM_ORDER_TYPE orderType,
       }
       if(takeProfit > 0.0 && (referencePrice - takeProfit) < (minDistance - epsilon))
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: modify bloqueado (TP perto do preco/freeze). contexto=", context,
+         Print("WARN: modify bloqueado (TP perto do preco/freeze). contexto=", context,
                " | ref=", DoubleToString(referencePrice, 5),
                " | tp=", DoubleToString(takeProfit, 5),
                " | min_dist=", DoubleToString(minDistance, 5));
@@ -1760,7 +1772,7 @@ void ActivateNoSLKillSwitch(string reason)
       g_killSwitchNoSLActivatedTime = nowTs;
       g_killSwitchNoSLReason = reason;
       g_killSwitchNoSLLastLogTime = 0;
-      if(g_releaseInfoLogsEnabled) Print("CRITICAL: KILL-SWITCH ativado por violacao de SL. Motivo: ", reason);
+      Print("CRITICAL: KILL-SWITCH ativado por violacao de SL. Motivo: ", reason);
       return;
    }
 
@@ -1782,7 +1794,7 @@ bool IsNoSLKillSwitchActive(string context = "")
          msg += " Contexto=" + context + ".";
       if(g_killSwitchNoSLReason != "")
          msg += " Motivo=" + g_killSwitchNoSLReason + ".";
-      if(g_releaseInfoLogsEnabled) Print(msg);
+      Print(msg);
       g_killSwitchNoSLLastLogTime = nowTs;
    }
 
@@ -1828,7 +1840,7 @@ bool ValidateStopLossForEntryOrder(ENUM_ORDER_TYPE orderType,
    {
       string reason = context + ": SL ausente/invalido (entry=" + DoubleToString(entryPrice, 2) +
                       " sl=" + DoubleToString(stopLoss, 2) + ")";
-      if(g_releaseInfoLogsEnabled) Print("CRITICAL: ", reason);
+      Print("CRITICAL: ", reason);
       if(activateKillSwitchOnFail)
          ActivateNoSLKillSwitch(reason);
       return false;
@@ -1851,7 +1863,7 @@ bool ValidateStopLossForEntryOrder(ENUM_ORDER_TYPE orderType,
       string reason = context + ": SL em lado invalido (entry=" + DoubleToString(entryPrice, 2) +
                       " sl=" + DoubleToString(stopLoss, 2) +
                       " type=" + EnumToString(entryDirection) + ")";
-      if(g_releaseInfoLogsEnabled) Print("CRITICAL: ", reason);
+      Print("CRITICAL: ", reason);
       if(activateKillSwitchOnFail)
          ActivateNoSLKillSwitch(reason);
       return false;
@@ -1874,7 +1886,7 @@ bool ValidateStopLossForOpenPosition(ENUM_ORDER_TYPE orderType,
    {
       string reason = context + ": SL ausente/invalido em posicao aberta (entry=" + DoubleToString(entryPrice, 2) +
                       " sl=" + DoubleToString(stopLoss, 2) + ")";
-      if(g_releaseInfoLogsEnabled) Print("CRITICAL: ", reason);
+      Print("CRITICAL: ", reason);
       if(activateKillSwitchOnFail)
          ActivateNoSLKillSwitch(reason);
       return false;
@@ -2515,14 +2527,14 @@ bool SchedulePCMActivationFromTP(datetime tpTime,
    int tpBarShift = iBarShift(_Symbol, g_pcmActiveTimeframe, tpTime, false);
    if(tpBarShift < 0)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCM nao armado - candle de referencia nao encontrado no timeframe ", EnumToString(g_pcmActiveTimeframe));
+      Print("WARN: PCM nao armado - candle de referencia nao encontrado no timeframe ", EnumToString(g_pcmActiveTimeframe));
       return false;
    }
 
    datetime startCandleTime = iTime(_Symbol, g_pcmActiveTimeframe, tpBarShift);
    if(startCandleTime <= 0)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCM nao armado - horario inicial invalido.");
+      Print("WARN: PCM nao armado - horario inicial invalido.");
       return false;
    }
 
@@ -2607,7 +2619,7 @@ bool SchedulePCMActivationFromNoTradeLimitTarget(datetime targetTime,
    }
    else
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: Falha ao armar PCM por NoTrade. rr_max=",
+      Print("WARN: Falha ao armar PCM por NoTrade. rr_max=",
             DoubleToString(rrMaxReached, 4),
             " | rr_min=", DoubleToString(rrMinRequired, 4),
             " | pcm_ops_today=", IntegerToString(g_pcmOperationsToday),
@@ -2893,13 +2905,13 @@ void CancelPreArmedReversalOrder(string reason = "")
       if(trade.OrderDelete(g_preArmedReversalOrderTicket))
       {
          if(reason == "")
-            if(g_releaseInfoLogsEnabled) Print("INFO: ordem pre-armada de virada cancelada. Ticket=", g_preArmedReversalOrderTicket);
+            REVERSAL_LOG("INFO: ordem pre-armada de virada cancelada. Ticket=", g_preArmedReversalOrderTicket);
          else
-            if(g_releaseInfoLogsEnabled) Print("INFO: ordem pre-armada de virada cancelada (", reason, "). Ticket=", g_preArmedReversalOrderTicket);
+            REVERSAL_LOG("INFO: ordem pre-armada de virada cancelada (", reason, "). Ticket=", g_preArmedReversalOrderTicket);
       }
       else
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: falha ao cancelar ordem pre-armada de virada. Ticket=", g_preArmedReversalOrderTicket,
+         Print("WARN: falha ao cancelar ordem pre-armada de virada. Ticket=", g_preArmedReversalOrderTicket,
                " | retcode=", trade.ResultRetcode(), " | ", trade.ResultRetcodeDescription());
       }
    }
@@ -2936,7 +2948,7 @@ bool PlacePreArmedReversalStopOrder(ENUM_ORDER_TYPE baseOrderType,
       if(!g_reversalBlockedByEntryHour)
       {
          MarkReversalBlockedByEntryHour();
-         if(g_releaseInfoLogsEnabled) Print("INFO: virada pre-armada bloqueada por horario limite de entrada.");
+         REVERSAL_LOG("INFO: virada pre-armada bloqueada por horario limite de entrada.");
       }
       return false;
    }
@@ -3001,7 +3013,7 @@ bool PlacePreArmedReversalStopOrder(ENUM_ORDER_TYPE baseOrderType,
       g_preArmedReversalLotSize = lotSize;
       g_preArmedReversalIsSliced = isSliced;
       g_preArmedReversalChannelDefinitionTime = channelDefinitionTime;
-      if(g_releaseInfoLogsEnabled) Print("INFO: virada pre-armada equivalente ja existente, estado adotado. Ticket=", equivalentPreArmedTicket);
+      REVERSAL_LOG("INFO: virada pre-armada equivalente ja existente, estado adotado. Ticket=", equivalentPreArmedTicket);
       return true;
    }
 
@@ -3030,7 +3042,7 @@ bool PlacePreArmedReversalStopOrder(ENUM_ORDER_TYPE baseOrderType,
                                        false,
                                        true))
    {
-      if(g_releaseInfoLogsEnabled) Print("INFO: virada pre-armada bloqueada por DD+LIMIT projetado.");
+      REVERSAL_LOG("INFO: virada pre-armada bloqueada por DD+LIMIT projetado.");
       return false;
    }
 
@@ -3052,7 +3064,7 @@ bool PlacePreArmedReversalStopOrder(ENUM_ORDER_TYPE baseOrderType,
       g_preArmedReversalIsSliced = isSliced;
       g_preArmedReversalChannelDefinitionTime = channelDefinitionTime;
 
-      if(g_releaseInfoLogsEnabled) Print("INFO: virada pre-armada por STOP criada. Ticket=", g_preArmedReversalOrderTicket,
+      REVERSAL_LOG("INFO: virada pre-armada por STOP criada. Ticket=", g_preArmedReversalOrderTicket,
             " | tipo=", EnumToString(reversalType),
             " | entrada=", entryPrice,
             " | SL=", revStopLoss,
@@ -3061,7 +3073,7 @@ bool PlacePreArmedReversalStopOrder(ENUM_ORDER_TYPE baseOrderType,
       return true;
    }
 
-   if(g_releaseInfoLogsEnabled) Print("WARN: falha ao criar virada pre-armada por STOP | retcode=", retcode, " | ", trade.ResultRetcodeDescription());
+   Print("WARN: falha ao criar virada pre-armada por STOP | retcode=", retcode, " | ", trade.ResultRetcodeDescription());
    return false;
 }
 
@@ -3227,7 +3239,7 @@ bool TryAdoptTriggeredPreArmedReversal(bool fromOvernightFlow)
       ClearPreArmedReversalState();
       g_lastClosedOvernightChainIdHint = 0;
 
-      if(g_releaseInfoLogsEnabled) Print("INFO: virada pre-armada (STOP) acionada no fluxo overnight. Ticket: ", g_overnightTicket);
+      REVERSAL_LOG("INFO: virada pre-armada (STOP) acionada no fluxo overnight. Ticket: ", g_overnightTicket);
       return true;
    }
 
@@ -3266,7 +3278,7 @@ bool TryAdoptTriggeredPreArmedReversal(bool fromOvernightFlow)
 
    ClearPreArmedReversalState();
    g_lastClosedOvernightChainIdHint = 0;
-   if(g_releaseInfoLogsEnabled) Print("INFO: virada pre-armada (STOP) adotada como operacao atual. Ticket: ", g_currentTicket);
+   REVERSAL_LOG("INFO: virada pre-armada (STOP) adotada como operacao atual. Ticket: ", g_currentTicket);
    return true;
 }
 
@@ -3447,21 +3459,21 @@ int OnInit()
          g_negativeAddRuntimeEnabled = false;
          if(g_negativeAddRuntimeDisableReason == "")
             g_negativeAddRuntimeDisableReason = "NegativeAddMaxEntries <= 0";
-         if(g_releaseInfoLogsEnabled) Print("WARN: Adicao em flutuacao negativa desabilitada. NegativeAddMaxEntries <= 0.");
+         Print("WARN: Adicao em flutuacao negativa desabilitada. NegativeAddMaxEntries <= 0.");
       }
       if(NegativeAddTriggerPercent <= 0.0)
       {
          g_negativeAddRuntimeEnabled = false;
          if(g_negativeAddRuntimeDisableReason == "")
             g_negativeAddRuntimeDisableReason = "NegativeAddTriggerPercent <= 0";
-         if(g_releaseInfoLogsEnabled) Print("WARN: Adicao em flutuacao negativa desabilitada. NegativeAddTriggerPercent <= 0.");
+         Print("WARN: Adicao em flutuacao negativa desabilitada. NegativeAddTriggerPercent <= 0.");
       }
       if(NegativeAddLotMultiplier <= 0.0 && !IsFixedLotAllEntriesEnabled())
       {
          g_negativeAddRuntimeEnabled = false;
          if(g_negativeAddRuntimeDisableReason == "")
             g_negativeAddRuntimeDisableReason = "NegativeAddLotMultiplier <= 0";
-         if(g_releaseInfoLogsEnabled) Print("WARN: Adicao em flutuacao negativa desabilitada. NegativeAddLotMultiplier <= 0.");
+         Print("WARN: Adicao em flutuacao negativa desabilitada. NegativeAddLotMultiplier <= 0.");
       }
       if(NegativeAddLotMultiplier <= 0.0 && IsFixedLotAllEntriesEnabled())
       {
@@ -3473,14 +3485,14 @@ int OnInit()
       if(!EnableNegativeAddOn)
       {
          g_negativeAddTPAdjustRuntimeEnabled = false;
-         if(g_releaseInfoLogsEnabled) Print("WARN: Ajuste de TP apos addon desabilitado. EnableNegativeAddOn = false.");
+         Print("WARN: Ajuste de TP apos addon desabilitado. EnableNegativeAddOn = false.");
       }
       bool hasGeneralAddTPDistance = (NegativeAddTPDistancePercent > 0.0);
       bool hasPCMAddTPDistance = (EnablePCM && PCMNegativeAddTPDistancePercent > 0.0);
       if(!hasGeneralAddTPDistance && !hasPCMAddTPDistance)
       {
          g_negativeAddTPAdjustRuntimeEnabled = false;
-         if(g_releaseInfoLogsEnabled) Print("WARN: Ajuste de TP apos addon desabilitado. Distancia <= 0 para geral e PCM.");
+         Print("WARN: Ajuste de TP apos addon desabilitado. Distancia <= 0 para geral e PCM.");
       }
       else if(!hasGeneralAddTPDistance && hasPCMAddTPDistance)
       {
@@ -3488,52 +3500,52 @@ int OnInit()
       }
    }
    if(ReversalSLDistanceFactor <= 0.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: ReversalSLDistanceFactor <= 0. Sera usado 1.0 em runtime.");
+      Print("WARN: ReversalSLDistanceFactor <= 0. Sera usado 1.0 em runtime.");
    if(ReversalTPDistanceFactor <= 0.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: ReversalTPDistanceFactor <= 0. Sera usado 1.0 em runtime.");
+      Print("WARN: ReversalTPDistanceFactor <= 0. Sera usado 1.0 em runtime.");
    if(EnablePCM && PCMChannelBars < 4)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCM desabilitada em runtime. PCMChannelBars precisa ser >= 4.");
+      Print("WARN: PCM desabilitada em runtime. PCMChannelBars precisa ser >= 4.");
    if(EnablePCM && PCMMaxOperationsPerDay <= 0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCM desabilitada em runtime. PCMMaxOperationsPerDay precisa ser > 0.");
+      Print("WARN: PCM desabilitada em runtime. PCMMaxOperationsPerDay precisa ser > 0.");
    if(EnablePCM && PCMReferenceTimeframe != PERIOD_M1 &&
       PCMReferenceTimeframe != PERIOD_M5 &&
       PCMReferenceTimeframe != PERIOD_M15)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCM desabilitada em runtime. PCMReferenceTimeframe deve ser M1, M5 ou M15.");
+      Print("WARN: PCM desabilitada em runtime. PCMReferenceTimeframe deve ser M1, M5 ou M15.");
    }
    if(EnablePCM && PCMEnableSkipLargeCandle && PCMMaxCandlePoints <= 0.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: filtro de candle grande do PCM ignorado. PCMMaxCandlePoints <= 0.");
+      Print("WARN: filtro de candle grande do PCM ignorado. PCMMaxCandlePoints <= 0.");
    if(EnablePCM && PCMRiskPercent <= 0.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCMRiskPercent <= 0. Entradas PCM usarao RiskPercent.");
+      Print("WARN: PCMRiskPercent <= 0. Entradas PCM usarao RiskPercent.");
    if(EnablePCM && PCMTPReductionPercent < 0.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCMTPReductionPercent < 0. Sera usado 0 em runtime.");
+      Print("WARN: PCMTPReductionPercent < 0. Sera usado 0 em runtime.");
    if(EnablePCM && PCMTPReductionPercent >= 100.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCMTPReductionPercent >= 100. Sera limitado para 99.99 em runtime.");
+      Print("WARN: PCMTPReductionPercent >= 100. Sera limitado para 99.99 em runtime.");
    if(EnablePCM && BreakEven && PCMBreakEvenTriggerPercent <= 0.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCMBreakEvenTriggerPercent <= 0. Break even PCM ficara inativo.");
+      Print("WARN: PCMBreakEvenTriggerPercent <= 0. Break even PCM ficara inativo.");
    if(EnablePCM && BreakEven && PCMBreakEvenTriggerPercent > 100.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCMBreakEvenTriggerPercent > 100. Sera limitado para 100 em runtime.");
+      Print("WARN: PCMBreakEvenTriggerPercent > 100. Sera limitado para 100 em runtime.");
    if(EnablePCM && PCMNegativeAddTPDistancePercent <= 0.0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: PCMNegativeAddTPDistancePercent <= 0. Ajuste TP por ADON em PCM usara parametro geral.");
+      Print("WARN: PCMNegativeAddTPDistancePercent <= 0. Ajuste TP por ADON em PCM usara parametro geral.");
    if(EnablePCM && !PCMUseMainChannelRangeParams)
    {
       if(PCMMinChannelRange < 0.0)
-         if(g_releaseInfoLogsEnabled) Print("WARN: PCMMinChannelRange < 0. O valor deve ser >= 0.");
+         Print("WARN: PCMMinChannelRange < 0. O valor deve ser >= 0.");
       if(PCMMaxChannelRange <= 0.0)
-         if(g_releaseInfoLogsEnabled) Print("WARN: PCMMaxChannelRange <= 0. O valor deve ser > 0.");
+         Print("WARN: PCMMaxChannelRange <= 0. O valor deve ser > 0.");
       if(PCMMaxChannelRange < PCMMinChannelRange)
-         if(g_releaseInfoLogsEnabled) Print("WARN: PCMMaxChannelRange < PCMMinChannelRange. Revise os parametros de range PCM.");
+         Print("WARN: PCMMaxChannelRange < PCMMinChannelRange. Revise os parametros de range PCM.");
       if(PCMSlicedThreshold <= 0.0)
-         if(g_releaseInfoLogsEnabled) Print("WARN: PCMSlicedThreshold <= 0. O valor deve ser > 0.");
+         Print("WARN: PCMSlicedThreshold <= 0. O valor deve ser > 0.");
    }
    if(BreakEven && !EnablePCM)
-      if(g_releaseInfoLogsEnabled) Print("WARN: BreakEven ativo, mas EnablePCM esta desabilitado.");
+      Print("WARN: BreakEven ativo, mas EnablePCM esta desabilitado.");
    if(TraillingStop && !EnablePCM)
-      if(g_releaseInfoLogsEnabled) Print("WARN: TraillingStop ativo, mas EnablePCM esta desabilitado.");
+      Print("WARN: TraillingStop ativo, mas EnablePCM esta desabilitado.");
    if(EnablePCMOnNoTradeLimitTarget && !EnablePCM)
-      if(g_releaseInfoLogsEnabled) Print("WARN: EnablePCMOnNoTradeLimitTarget ativo, mas EnablePCM esta desabilitado.");
+      Print("WARN: EnablePCMOnNoTradeLimitTarget ativo, mas EnablePCM esta desabilitado.");
    if(DDVerboseLogIntervalSeconds <= 0)
-      if(g_releaseInfoLogsEnabled) Print("WARN: DDVerboseLogIntervalSeconds <= 0. Sera usado intervalo minimo de 1s.");
+      Print("WARN: DDVerboseLogIntervalSeconds <= 0. Sera usado intervalo minimo de 1s.");
 
    // Inicializar log
    if(EnableLogging)
@@ -4555,7 +4567,7 @@ void ExecuteMarketOrder(ENUM_ORDER_TYPE orderType, double price, double stopLoss
 
    if(ShouldUseLimitForMainEntry())
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: ExecuteMarketOrder bloqueado por modo LIMIT na entrada principal. Ordem sera enviada como LIMIT marketable.");
+      Print("WARN: ExecuteMarketOrder bloqueado por modo LIMIT na entrada principal. Ordem sera enviada como LIMIT marketable.");
       string forcedLimitComment = isPCMContext ? InternalTagPCM : InternalTagFirst;
       PlaceLimitOrder(orderType,
                       stopLoss,
@@ -4672,7 +4684,7 @@ void ExecuteMarketOrder(ENUM_ORDER_TYPE orderType, double price, double stopLoss
          if(g_releaseInfoLogsEnabled) Print(" Primeira operacao executada! Ticket: ", g_currentTicket);
    }
    else
-      if(g_releaseInfoLogsEnabled) Print(" Erro: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
+      Print("Erro: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
 }
 
 //+------------------------------------------------------------------+
@@ -4911,7 +4923,7 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType,
    else
    {
       long retcode = trade.ResultRetcode();
-      if(g_releaseInfoLogsEnabled) Print(" Erro: ", retcode, " - ", trade.ResultRetcodeDescription());
+      Print("Erro: ", retcode, " - ", trade.ResultRetcodeDescription());
       if(IsPendingLimitRetryableRetcode(retcode))
       {
          ArmPendingLimitRetryState(orderType,
@@ -5246,9 +5258,9 @@ void CheckPendingOrderExecution()
          if(OrderSelect(g_currentTicket))
          {
             if(trade.OrderDelete(g_currentTicket))
-               if(g_releaseInfoLogsEnabled) Print("INFO: Ordem de virada cancelada por horario limite. Ticket: ", g_currentTicket);
+               REVERSAL_LOG("INFO: Ordem de virada cancelada por horario limite. Ticket: ", g_currentTicket);
             else
-               if(g_releaseInfoLogsEnabled) Print("WARN: falha ao cancelar ordem de virada por horario limite. Ticket: ", g_currentTicket,
+               Print("WARN: falha ao cancelar ordem de virada por horario limite. Ticket: ", g_currentTicket,
                      " | retcode=", trade.ResultRetcode(), " | ", trade.ResultRetcodeDescription());
          }
 
@@ -5278,7 +5290,7 @@ void CheckPendingOrderExecution()
       if(trade.OrderDelete(g_currentTicket))
          if(g_releaseInfoLogsEnabled) Print(" Ordem limite cancelada por limite de DD. Ticket: ", g_currentTicket);
       else
-         if(g_releaseInfoLogsEnabled) Print(" WARN: falha ao cancelar ordem limite por DD. Ticket: ", g_currentTicket,
+         Print("WARN: falha ao cancelar ordem limite por DD. Ticket: ", g_currentTicket,
                " | retcode=", trade.ResultRetcode(), " | ", trade.ResultRetcodeDescription());
 
       if(g_pendingOrderIsPCM)
@@ -5492,7 +5504,7 @@ void CheckPendingOrderExecution()
          ResetReversalHourBlockState();
          g_lastClosedOvernightChainIdHint = 0;
 
-         if(g_releaseInfoLogsEnabled) Print(" Virada overnight LIMIT executada sem consumir entrada diaria! Ticket: ", g_overnightTicket);
+         REVERSAL_LOG("Virada overnight LIMIT executada sem consumir entrada diaria! Ticket: ", g_overnightTicket);
          return;
       }
 
@@ -5541,7 +5553,7 @@ void CheckPendingOrderExecution()
          if(ClosePositionByTicketMarket(g_currentTicket, "DD+LIMIT pos-open"))
             if(g_releaseInfoLogsEnabled) Print(" Posicao de ordem limite fechada por limite de DD. Ticket: ", g_currentTicket);
          else
-            if(g_releaseInfoLogsEnabled) Print(" WARN: nao foi possivel fechar posicao de ordem limite sob DD. Ticket: ", g_currentTicket);
+            Print("WARN: nao foi possivel fechar posicao de ordem limite sob DD. Ticket: ", g_currentTicket);
       }
       return;
    }
@@ -5750,9 +5762,9 @@ void CancelNegativeAddPendingOrders(string reason = "")
          if(trade.OrderDelete(ticket))
          {
             if(reason == "")
-               if(g_releaseInfoLogsEnabled) Print("INFO: ordem LIMIT de addon cancelada. Ticket=", ticket);
+               NEGATIVE_ADD_LOG("INFO: ordem LIMIT de addon cancelada. Ticket=", ticket);
             else
-               if(g_releaseInfoLogsEnabled) Print("INFO: ordem LIMIT de addon cancelada (", reason, "). Ticket=", ticket);
+               NEGATIVE_ADD_LOG("INFO: ordem LIMIT de addon cancelada (", reason, "). Ticket=", ticket);
          }
       }
    }
@@ -6762,7 +6774,7 @@ void RecoverRuntimeStateFromBroker(string context = "runtime")
 
       if(oppositeDirectionCount > 0)
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: recuperacao detectou posicoes em direcoes opostas para o mesmo EA. ",
+         Print("WARN: recuperacao detectou posicoes em direcoes opostas para o mesmo EA. ",
                "Apos recuperacao, apenas a direcao do ticket mais recente foi adotada.");
       }
    }
@@ -7054,7 +7066,7 @@ bool CancelPendingOrderByTicketForDDQueue(ulong ticket, string reason)
    bool deleted = trade.OrderDelete(ticket);
    if(!deleted)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: DD queue falhou ao cancelar ordem. Ticket=", ticket,
+      Print("WARN: DD queue falhou ao cancelar ordem. Ticket=", ticket,
             " | motivo=", reason,
             " | retcode=", trade.ResultRetcode(),
             " | ", trade.ResultRetcodeDescription());
@@ -7330,7 +7342,7 @@ bool EnforceProjectedDrawdownAfterPositionOpen(string context, ulong openedTicke
 
    if(openedTicket == 0)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: DD+LIMIT pos-abertura excedido, mas ticket aberto e invalido. contexto=", context);
+      Print("WARN: DD+LIMIT pos-abertura excedido, mas ticket aberto e invalido. contexto=", context);
       return false;
    }
 
@@ -7341,7 +7353,7 @@ bool EnforceProjectedDrawdownAfterPositionOpen(string context, ulong openedTicke
    }
    else
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: Falha ao fechar posicao que excedeu DD+LIMIT pos-abertura. contexto=", context,
+      Print("WARN: Falha ao fechar posicao que excedeu DD+LIMIT pos-abertura. contexto=", context,
             " | ticket=", openedTicket,
             " | retcode=", trade.ResultRetcode(), " | ", trade.ResultRetcodeDescription());
    }
@@ -8324,7 +8336,7 @@ void LogNegativeAddDebug(int reasonCode, string details, bool force=false)
 
    g_negativeAddLastReasonCode = reasonCode;
    g_negativeAddLastDebugLogTime = now;
-   if(g_releaseInfoLogsEnabled) Print("NEG_ADD DEBUG | reason=", reasonCode, " | ", details);
+   NEGATIVE_ADD_LOG("NEG_ADD DEBUG | reason=", reasonCode, " | ", details);
 }
 
 //+------------------------------------------------------------------+
@@ -8953,7 +8965,7 @@ bool TryAdjustTakeProfitAfterAddonExecution(double fallbackEntryPrice)
          }
       }
 
-      if(g_releaseInfoLogsEnabled) Print("INFO: TP ajustado apos addon | TP antigo=", DoubleToString(oldTakeProfit, digits),
+      NEGATIVE_ADD_LOG("INFO: TP ajustado apos addon | TP antigo=", DoubleToString(oldTakeProfit, digits),
             " | TP novo=", DoubleToString(g_firstTradeTakeProfit, digits),
             " | entrada media=", DoubleToString(tpReferenceEntry, digits),
             " | distancia=", DoubleToString(tpDistancePercent, 2), "%",
@@ -9436,7 +9448,7 @@ bool TryExecuteNegativeAddOn()
                   }
                   tpAdjustedAfterAdd = true;
 
-                  if(g_releaseInfoLogsEnabled) Print("INFO: TP ajustado apos addon | TP antigo=", DoubleToString(oldTakeProfit, digits),
+                  NEGATIVE_ADD_LOG("INFO: TP ajustado apos addon | TP antigo=", DoubleToString(oldTakeProfit, digits),
                         " | TP novo=", DoubleToString(g_firstTradeTakeProfit, digits),
                         " | entrada media=", DoubleToString(tpReferenceEntry, digits),
                         " | distancia=", DoubleToString(tpDistancePercent, 2), "%",
@@ -9482,7 +9494,7 @@ bool TryExecuteNegativeAddOn()
          }
       }
 
-      if(g_releaseInfoLogsEnabled) Print("INFO: Adicao negativa executada. #", g_negativeAddEntriesExecuted,
+      NEGATIVE_ADD_LOG("INFO: Adicao negativa executada. #", g_negativeAddEntriesExecuted,
             " | lote=", DoubleToString(addLot, 2),
             " | adverse=", DoubleToString(adverseFraction * 100.0, 2), "%");
       LogNegativeAddDebug(30,
@@ -9495,7 +9507,7 @@ bool TryExecuteNegativeAddOn()
                        "send failed | retcode=" + IntegerToString((int)retcode) +
                        " | " + trade.ResultRetcodeDescription(),
                        true);
-   if(g_releaseInfoLogsEnabled) Print("WARN: Falha ao executar adicao negativa | retcode=", retcode, " | ", trade.ResultRetcodeDescription());
+   Print("WARN: Falha ao executar adicao negativa | retcode=", retcode, " | ", trade.ResultRetcodeDescription());
    return false;
 }
 
@@ -9804,7 +9816,7 @@ bool ClosePositionByTicketMarket(ulong ticket, string reason)
       return true;
    }
 
-   if(g_releaseInfoLogsEnabled) Print("WARN: Falha ao fechar ticket ", ticket, " | retcode=", retcode, " | ", trade.ResultRetcodeDescription());
+   Print("WARN: Falha ao fechar ticket ", ticket, " | retcode=", retcode, " | ", trade.ResultRetcodeDescription());
    return false;
 }
 
@@ -9865,7 +9877,7 @@ int CancelAllPendingOrdersForNoOvernight(string reason = "")
       }
       else
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: Falha ao cancelar ordem pendente por politica sem overnight. Ticket=", ticket,
+         Print("WARN: Falha ao cancelar ordem pendente por politica sem overnight. Ticket=", ticket,
                " | retcode=", trade.ResultRetcode(), " | ", trade.ResultRetcodeDescription());
       }
    }
@@ -9952,11 +9964,11 @@ bool EnforceStopLossSafetyMonitor(string context)
 
       if(ClosePositionByTicketMarket(ticket, "kill-switch sem SL"))
       {
-         if(g_releaseInfoLogsEnabled) Print("CRITICAL: Posicao sem SL encerrada automaticamente. Ticket=", ticketLabel);
+         Print("CRITICAL: Posicao sem SL encerrada automaticamente. Ticket=", ticketLabel);
       }
       else
       {
-         if(g_releaseInfoLogsEnabled) Print("CRITICAL: Falha ao encerrar posicao sem SL. Ticket=", ticketLabel,
+         Print("CRITICAL: Falha ao encerrar posicao sem SL. Ticket=", ticketLabel,
                " | retcode=", trade.ResultRetcode(), " | ", trade.ResultRetcodeDescription());
       }
    }
@@ -9990,11 +10002,11 @@ bool EnforceStopLossSafetyMonitor(string context)
 
       if(trade.OrderDelete(ticket))
       {
-         if(g_releaseInfoLogsEnabled) Print("CRITICAL: Ordem pendente sem SL cancelada automaticamente. Ticket=", ticketLabel);
+         Print("CRITICAL: Ordem pendente sem SL cancelada automaticamente. Ticket=", ticketLabel);
       }
       else
       {
-         if(g_releaseInfoLogsEnabled) Print("CRITICAL: Falha ao cancelar ordem pendente sem SL. Ticket=", ticketLabel,
+         Print("CRITICAL: Falha ao cancelar ordem pendente sem SL. Ticket=", ticketLabel,
                " | retcode=", trade.ResultRetcode(), " | ", trade.ResultRetcodeDescription());
       }
 
@@ -10120,7 +10132,7 @@ bool ApplyNoOvernightPolicy()
       return true;
    }
 
-   if(g_releaseInfoLogsEnabled) Print("WARN: politica sem overnight nao zerou totalmente a exposicao.",
+   Print("WARN: politica sem overnight nao zerou totalmente a exposicao.",
          " | pending_restante=", remainingPending,
          " | posicoes_restantes=", remainingOpen);
    RecoverRuntimeStateFromBroker("ApplyNoOvernightPolicy_partial");
@@ -10291,7 +10303,7 @@ bool LogClosedOvernightTrade(ulong ticket,
    {
       if(!hasExit)
       {
-         if(g_releaseInfoLogsEnabled) Print("WARN: nao foi possivel resolver fechamento overnight do ticket ", ticket);
+         Print("WARN: nao foi possivel resolver fechamento overnight do ticket ", ticket);
          return false;
       }
 
@@ -10301,7 +10313,7 @@ bool LogClosedOvernightTrade(ulong ticket,
 
    if(entryTime <= 0 || !hasExit)
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: nao foi possivel logar fechamento overnight do ticket ", ticket);
+      Print("WARN: nao foi possivel logar fechamento overnight do ticket ", ticket);
       return false;
    }
 
@@ -10647,7 +10659,7 @@ void CheckPositionStatus()
          }
          else
          {
-            if(g_releaseInfoLogsEnabled) Print("WARN: mantendo ticket overnight para nova tentativa de log");
+            Print("WARN: mantendo ticket overnight para nova tentativa de log");
          }
       }
       else
@@ -10742,7 +10754,7 @@ void CheckPositionStatus()
          }
          else
          {
-            if(g_releaseInfoLogsEnabled) Print("WARN: mantendo ticket overnight para nova tentativa de log");
+            Print("WARN: mantendo ticket overnight para nova tentativa de log");
          }
       }
       else
@@ -10796,7 +10808,7 @@ void CheckPositionStatus()
          if(!g_reversalBlockedByEntryHour)
          {
             MarkReversalBlockedByEntryHour();
-            if(g_releaseInfoLogsEnabled) Print("INFO: virada bloqueada por horario limite enquanto posicao permanecia aberta.");
+            REVERSAL_LOG("INFO: virada bloqueada por horario limite enquanto posicao permanecia aberta.");
          }
       }
       if(g_tradePCM)
@@ -10930,7 +10942,7 @@ void CheckPositionStatus()
                      if(IsReversalCommentText(comment) || IsReversalCommentText(orderComment))
                      {
                         isReversal = true;
-                        if(g_releaseInfoLogsEnabled) Print(" turnof detectada no historico");
+                        REVERSAL_LOG("turnof detectada no historico");
                      }
                      if(IsPCMCommentText(comment) || IsPCMCommentText(orderComment))
                      {
@@ -10962,7 +10974,7 @@ void CheckPositionStatus()
                            if(IsReversalCommentText(orderComment))
                            {
                               isReversal = true;
-                              if(g_releaseInfoLogsEnabled) Print("INFO: turnof detectada no comentario da ordem");
+                              REVERSAL_LOG("INFO: turnof detectada no comentario da ordem");
                            }
                         }
                      }
@@ -11072,14 +11084,14 @@ void CheckPositionStatus()
                   pcmScheduledFromSL = SchedulePCMActivationFromTP(exitTime, true, "PCM_SL");
 
                if(pcmScheduledFromSL)
-                  if(g_releaseInfoLogsEnabled) Print(" STOP LOSS ATINGIDO - Operacao PCM sem turnof. PCM armado para nova operacao.");
+                  REVERSAL_LOG("STOP LOSS ATINGIDO - Operacao PCM sem turnof. PCM armado para nova operacao.");
                else
-                  if(g_releaseInfoLogsEnabled) Print(" STOP LOSS ATINGIDO - Operacao PCM nao permite turnof. Encerrando ciclo.");
+                  REVERSAL_LOG("STOP LOSS ATINGIDO - Operacao PCM nao permite turnof. Encerrando ciclo.");
                CancelPreArmedReversalOrder("SL de operacao PCM - turnof desabilitada");
             }
             else if(EnableReversal)
             {
-               if(g_releaseInfoLogsEnabled) Print(" STOP LOSS ATINGIDO - Virando a mao!");
+               REVERSAL_LOG("STOP LOSS ATINGIDO - Virando a mao!");
                reversalOpenedNow = TryAdoptTriggeredPreArmedReversal(false);
                if(!reversalOpenedNow)
                {
@@ -11095,7 +11107,7 @@ void CheckPositionStatus()
             }
             else
             {
-               if(g_releaseInfoLogsEnabled) Print(" STOP LOSS ATINGIDO - turnof desabilitada");
+               REVERSAL_LOG("STOP LOSS ATINGIDO - turnof desabilitada");
                CancelPreArmedReversalOrder("SL com virada desabilitada");
             }
          }
@@ -11125,7 +11137,7 @@ void CheckPositionStatus()
       }
       else if(g_reversalTradeExecuted)
       {
-         if(g_releaseInfoLogsEnabled) Print(wasStopLoss ? " turnof: SL atingido" : " turnof: TP atingido");
+         REVERSAL_LOG(wasStopLoss ? "turnof: SL atingido" : "turnof: TP atingido");
          if(g_preArmedReversalOrderTicket > 0)
             CancelPreArmedReversalOrder("encerramento de trade de virada");
       }
@@ -11140,7 +11152,7 @@ void CheckPositionStatus()
       }
       else
       {
-         if(g_releaseInfoLogsEnabled) Print("INFO: Ticket de virada preservado para monitorar fechamento: ", g_currentTicket);
+         REVERSAL_LOG("INFO: Ticket de virada preservado para monitorar fechamento: ", g_currentTicket);
       }
    }
 }
@@ -11225,20 +11237,20 @@ void ExecuteReversal()
    if(!ValidateTradePermissions("ExecuteReversal", false))
       return;
 
-   if(g_releaseInfoLogsEnabled) Print(" === ExecuteReversal CHAMADA ===");
-   if(g_releaseInfoLogsEnabled) Print("  g_channelRange: ", g_channelRange);
-   if(g_releaseInfoLogsEnabled) Print("  g_cycle1Direction: ", g_cycle1Direction);
-   if(g_releaseInfoLogsEnabled) Print("  g_currentOrderType: ", EnumToString(g_currentOrderType));
+   REVERSAL_LOG("=== ExecuteReversal CHAMADA ===");
+   REVERSAL_LOG("  g_channelRange: ", g_channelRange);
+   REVERSAL_LOG("  g_cycle1Direction: ", g_cycle1Direction);
+   REVERSAL_LOG("  g_currentOrderType: ", EnumToString(g_currentOrderType));
 
    if(g_tradePCM)
    {
-      if(g_releaseInfoLogsEnabled) Print(" turnof cancelada - Estrategia PCM nao permite virada.");
+      REVERSAL_LOG("turnof cancelada - Estrategia PCM nao permite virada.");
       return;
    }
 
    if(IsDrawdownLimitReached("ExecuteReversal"))
    {
-      if(g_releaseInfoLogsEnabled) Print(" turnof cancelada por limite de drawdown.");
+      REVERSAL_LOG("turnof cancelada por limite de drawdown.");
       return;
    }
 
@@ -11246,7 +11258,7 @@ void ExecuteReversal()
    if(!IsReversalAllowedByEntryHourNow())
    {
       MarkReversalBlockedByEntryHour();
-      if(g_releaseInfoLogsEnabled) Print(" turnof cancelada - Horario limite atingido e virada apos limite desabilitada.");
+      REVERSAL_LOG("turnof cancelada - Horario limite atingido e virada apos limite desabilitada.");
       return;
    }
 
@@ -11263,7 +11275,7 @@ void ExecuteReversal()
    double slDistance = baseMultiplier * slFactor * g_channelRange;
    double tpDistance = baseMultiplier * tpFactor * g_channelRange;
 
-   if(g_releaseInfoLogsEnabled) Print("  BaseMult: ", baseMultiplier,
+   REVERSAL_LOG("  BaseMult: ", baseMultiplier,
          " | SL Factor: ", slFactor, " | TP Factor: ", tpFactor,
          " | SL Dist: ", slDistance, " | TP Dist: ", tpDistance);
 
@@ -11282,7 +11294,7 @@ void ExecuteReversal()
    double lotSize = IsFixedLotAllEntriesEnabled() ? ResolveFixedLotAllEntries() : NormalizeLot(g_firstTradeLotSize);
    if(lotSize <= 0.0)
    {
-      if(g_releaseInfoLogsEnabled) Print(" turnof cancelada - Lote invalido: ", lotSize);
+      REVERSAL_LOG("turnof cancelada - Lote invalido: ", lotSize);
       return;
    }
 
@@ -11302,13 +11314,13 @@ void ExecuteReversal()
    datetime reversalChannelDefinitionTime = (g_tradeChannelDefinitionTime > 0) ? g_tradeChannelDefinitionTime : g_channelDefinitionTime;
    bool reversalIsSliced = (g_cycle1Direction == "BOTH");
 
-   if(g_releaseInfoLogsEnabled) Print(" turnof:");
-   if(g_releaseInfoLogsEnabled) Print("  Tipo: ", EnumToString(reversalType));
-   if(g_releaseInfoLogsEnabled) Print("  Preco: ", price, " | SL: ", stopLoss, " | TP: ", takeProfit, " | Lotes: ", lotSize);
+   REVERSAL_LOG("turnof:");
+   REVERSAL_LOG("  Tipo: ", EnumToString(reversalType));
+   REVERSAL_LOG("  Preco: ", price, " | SL: ", stopLoss, " | TP: ", takeProfit, " | Lotes: ", lotSize);
 
    if(ShouldUseLimitForReversal())
    {
-      if(g_releaseInfoLogsEnabled) Print(" turnof configurada para LIMIT marketable.");
+      REVERSAL_LOG("turnof configurada para LIMIT marketable.");
       PlaceLimitOrder(reversalType,
                       stopLoss,
                       takeProfit,
@@ -11324,17 +11336,17 @@ void ExecuteReversal()
                       g_channelRange);
       if(g_pendingOrderPlaced && g_currentTicket > 0)
       {
-         if(g_releaseInfoLogsEnabled) Print(" turnof enviada como LIMIT. Ticket: ", g_currentTicket);
+         REVERSAL_LOG("turnof enviada como LIMIT. Ticket: ", g_currentTicket);
          return;
       }
 
       if(!AllowMarketFallbackReversal)
       {
-         if(g_releaseInfoLogsEnabled) Print(" turnof LIMIT falhou e fallback a mercado esta desabilitado.");
+         REVERSAL_LOG("turnof LIMIT falhou e fallback a mercado esta desabilitado.");
          return;
       }
 
-      if(g_releaseInfoLogsEnabled) Print(" WARN: virada LIMIT falhou; aplicando fallback a mercado.");
+      Print("WARN: virada LIMIT falhou; aplicando fallback a mercado.");
    }
 
    string turnofMarketGuardKey = BuildOrderIntentKey("MARKET_TURNOF",
@@ -11356,7 +11368,7 @@ void ExecuteReversal()
                                        false,
                                        true))
    {
-      if(g_releaseInfoLogsEnabled) Print(" turnof mercado bloqueada por DD+LIMIT projetado.");
+      REVERSAL_LOG("turnof mercado bloqueada por DD+LIMIT projetado.");
       return;
    }
 
@@ -11366,7 +11378,7 @@ void ExecuteReversal()
    else
       result = trade.Sell(lotSize, _Symbol, 0, stopLoss, takeProfit, InternalTagTurnof);
 
-   if(g_releaseInfoLogsEnabled) Print("  Result: ", result, " | ResultRetcode: ", trade.ResultRetcode());
+   REVERSAL_LOG("  Result: ", result, " | ResultRetcode: ", trade.ResultRetcode());
 
    if(IsTradeOperationSuccessful(result, false))
    {
@@ -11402,12 +11414,12 @@ void ExecuteReversal()
          PlaceNegativeAddOnLimitOrdersForStrictMode(g_tradeEntryPrice);
       g_lastClosedOvernightChainIdHint = 0;
 
-      if(g_releaseInfoLogsEnabled) Print(" turnof executada! Ticket: ", g_currentTicket);
-      if(g_releaseInfoLogsEnabled) Print(" FLAGS DEFINIDAS: g_tradeReversal=", g_tradeReversal, " | g_tradeSliced=", g_tradeSliced);
+      REVERSAL_LOG("turnof executada! Ticket: ", g_currentTicket);
+      REVERSAL_LOG(" FLAGS DEFINIDAS: g_tradeReversal=", g_tradeReversal, " | g_tradeSliced=", g_tradeSliced);
    }
    else
    {
-      if(g_releaseInfoLogsEnabled) Print(" Erro na virada: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
+      Print("Erro na virada: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
    }
 }
 
@@ -11435,25 +11447,25 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
 
    if(IsDrawdownLimitReached("TryExecuteOvernightReversal"))
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight cancelada por limite de drawdown.");
+      REVERSAL_LOG("Virada overnight cancelada por limite de drawdown.");
       return false;
    }
 
    if(closedWasReversal)
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight ignorada: operacao fechada ja era turnof");
+      REVERSAL_LOG("Virada overnight ignorada: operacao fechada ja era turnof");
       return false;
    }
 
    if(closedWasPCM)
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight ignorada: operacao fechada era PCM (PCM nao permite turnof).");
+      REVERSAL_LOG("Virada overnight ignorada: operacao fechada era PCM (PCM nao permite turnof).");
       return false;
    }
 
    if(g_currentTicket != 0 || g_pendingOrderPlaced)
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight ignorada: ja existe operacao ativa/pendente no ciclo atual");
+      REVERSAL_LOG("Virada overnight ignorada: ja existe operacao ativa/pendente no ciclo atual");
       return false;
    }
 
@@ -11461,7 +11473,7 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
    if(!IsReversalAllowedByEntryHourNow())
    {
       MarkReversalBlockedByEntryHour();
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight cancelada - Horario limite atingido e virada apos limite desabilitada.");
+      REVERSAL_LOG("Virada overnight cancelada - Horario limite atingido e virada apos limite desabilitada.");
       return false;
    }
 
@@ -11470,7 +11482,7 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
 
    if(channelRange <= 0.0)
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight cancelada - Channel range invalido: ", channelRange);
+      REVERSAL_LOG("Virada overnight cancelada - Channel range invalido: ", channelRange);
       return false;
    }
 
@@ -11483,7 +11495,7 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
    double tpDistance = baseMultiplier * tpFactor * channelRange;
    if(slDistance <= 0.0 || tpDistance <= 0.0)
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight cancelada - Distancia invalida: sl=", slDistance, " tp=", tpDistance);
+      REVERSAL_LOG("Virada overnight cancelada - Distancia invalida: sl=", slDistance, " tp=", tpDistance);
       return false;
    }
 
@@ -11502,7 +11514,7 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
    }
    if(lotSize <= 0.0)
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight cancelada - Lote invalido: ", lotSize);
+      REVERSAL_LOG("Virada overnight cancelada - Lote invalido: ", lotSize);
       return false;
    }
 
@@ -11555,19 +11567,19 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
       if(g_pendingOrderPlaced && g_currentTicket > 0)
       {
          if(AllowTradeWithOvernight)
-            if(g_releaseInfoLogsEnabled) Print(" Virada overnight enviada como LIMIT sem consumir entrada diaria. Ticket: ", g_currentTicket);
+            REVERSAL_LOG("Virada overnight enviada como LIMIT sem consumir entrada diaria. Ticket: ", g_currentTicket);
          else
-            if(g_releaseInfoLogsEnabled) Print(" Virada overnight enviada como LIMIT. Ticket: ", g_currentTicket);
+            REVERSAL_LOG("Virada overnight enviada como LIMIT. Ticket: ", g_currentTicket);
          return true;
       }
 
       if(!AllowMarketFallbackOvernightReversal)
       {
-         if(g_releaseInfoLogsEnabled) Print(" Virada overnight LIMIT falhou e fallback a mercado esta desabilitado.");
+         REVERSAL_LOG("Virada overnight LIMIT falhou e fallback a mercado esta desabilitado.");
          return false;
       }
 
-      if(g_releaseInfoLogsEnabled) Print(" WARN: virada overnight LIMIT falhou; aplicando fallback a mercado.");
+      Print("WARN: virada overnight LIMIT falhou; aplicando fallback a mercado.");
    }
 
    string overnightTurnofMarketGuardKey = BuildOrderIntentKey("MARKET_OVERNIGHT_TURNOF",
@@ -11589,7 +11601,7 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
                                        false,
                                        true))
    {
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight a mercado bloqueada por DD+LIMIT projetado.");
+      REVERSAL_LOG("Virada overnight a mercado bloqueada por DD+LIMIT projetado.");
       return false;
    }
 
@@ -11658,7 +11670,7 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
          ResetCurrentTradeFloatingMetrics();
          g_lastClosedOvernightChainIdHint = 0;
 
-         if(g_releaseInfoLogsEnabled) Print(" Virada overnight executada sem consumir entrada diaria! Ticket: ", g_overnightTicket);
+         REVERSAL_LOG("Virada overnight executada sem consumir entrada diaria! Ticket: ", g_overnightTicket);
          return true;
       }
 
@@ -11693,11 +11705,11 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
          PlaceNegativeAddOnLimitOrdersForStrictMode(g_tradeEntryPrice);
       g_lastClosedOvernightChainIdHint = 0;
 
-      if(g_releaseInfoLogsEnabled) Print(" Virada overnight executada! Ticket: ", g_currentTicket);
+      REVERSAL_LOG("Virada overnight executada! Ticket: ", g_currentTicket);
       return true;
    }
 
-   if(g_releaseInfoLogsEnabled) Print(" Erro na virada overnight: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
+   Print("Erro na virada overnight: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
    return false;
 }
 
@@ -12188,7 +12200,7 @@ void SaveLogs()
          if(g_releaseInfoLogsEnabled) Print(" Trades salvo: ", filesPath + tradesFile);
       }
       else
-         if(g_releaseInfoLogsEnabled) Print(" Erro ao salvar trades: ", GetLastError());
+         Print("Erro ao salvar trades: ", GetLastError());
    }
    else
    {
@@ -12220,7 +12232,7 @@ void SaveLogs()
          if(g_releaseInfoLogsEnabled) Print(" NoTrades salvo: ", filesPath + noTradesFile);
       }
       else
-         if(g_releaseInfoLogsEnabled) Print(" Erro ao salvar no-trades: ", GetLastError());
+         Print("Erro ao salvar no-trades: ", GetLastError());
    }
    else
    {
@@ -12322,6 +12334,11 @@ void LogTrade(datetime exitTime,
    {
       CollectNegativeAddMetricsCurrentTrade(addOnCount, addOnLots, addOnAvgEntryPrice, addOnProfit);
    }
+   double lotSize = NormalizeLot(g_firstTradeLotSize);
+   double totalLots = lotSize + addOnLots;
+   if(totalLots < 0.0)
+      totalLots = 0.0;
+   totalLots = NormalizeLot(totalLots);
 
    int operationChainId = ResolveOperationChainIdForLog(g_tradeEntryTime);
    if(operationChainId > g_operationChainCounter)
@@ -12369,7 +12386,7 @@ void LogTrade(datetime exitTime,
                                              isAddOperation);
    if(HasTradeDedupKey(tradeDedupKey))
    {
-      if(g_releaseInfoLogsEnabled) Print("WARN: LogTrade duplicado ignorado. key=", tradeDedupKey);
+      Print("WARN: LogTrade duplicado ignorado. key=", tradeDedupKey);
       return;
    }
    RegisterTradeDedupKey(tradeDedupKey);
@@ -12379,7 +12396,11 @@ void LogTrade(datetime exitTime,
    tradeJson += "  \"entry_time\": \"" + TimeToString(g_tradeEntryTime, TIME_DATE|TIME_MINUTES) + "\",\n";
    tradeJson += "  \"trigger_time\": \"" + triggerTimeText + "\",\n";
    tradeJson += "  \"exit_time\": \"" + TimeToString(exitTime, TIME_DATE|TIME_MINUTES) + "\",\n";
+   tradeJson += "  \"symbol\": \"" + _Symbol + "\",\n";
    tradeJson += "  \"direction\": \"" + EnumToString(g_currentOrderType) + "\",\n";
+   tradeJson += "  \"lot_size\": " + DoubleToString(lotSize, 2) + ",\n";
+   tradeJson += "  \"total_lots\": " + DoubleToString(totalLots, 2) + ",\n";
+   tradeJson += "  \"account_currency\": \"" + AccountInfoString(ACCOUNT_CURRENCY) + "\",\n";
    tradeJson += "  \"entry_price\": " + DoubleToString(g_tradeEntryPrice, 2) + ",\n";
    tradeJson += "  \"exit_price\": " + DoubleToString(exitPrice, 2) + ",\n";
    tradeJson += "  \"stop_loss\": " + DoubleToString(g_firstTradeStopLoss, 2) + ",\n";
@@ -12430,6 +12451,8 @@ void LogTrade(datetime exitTime,
                           EnumToString(g_currentOrderType),
                           g_tradeEntryTime,
                           exitTime,
+                          lotSize,
+                          totalLots,
                           g_tradeEntryPrice,
                           exitPrice,
                           g_firstTradeStopLoss,
@@ -12504,3 +12527,4 @@ void LogNoTrade(string reason,
 
    g_noTradesLog += noTradeJson;
 }
+

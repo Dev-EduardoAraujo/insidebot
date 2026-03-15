@@ -137,7 +137,7 @@ Documentacao tecnica baseada no estado atual de `sliced/prime_botV2.mq5`.
 
 - `EnableNegativeAddOn` ativa add-on por flutuacao adversa.
 - `NegativeAddTriggerPercent` define gatilho (% da distancia entrada -> SL).
-- Controle de lote por `NegativeAddLotMultiplier`.
+- `NegativeAddLotMultiplier` atua como teto opcional sobre o lote calculado pelo risco ate o SL.
 - Pode usar:
   - mesmo SL/TP (`NegativeAddUseSameSLTP`)
   - ajuste de TP pos add-on (`EnableNegativeAddTPAdjustment`)

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>InsideBot License Admin</title>
-  <link rel="stylesheet" href="/admin/styles.css?v=20260311d">
+  <link rel="stylesheet" href="/admin/styles.css?v=20260315a">
 </head>
 <body>
   <header class="topbar">
@@ -69,6 +69,14 @@
         <div class="mini-card">
           <span class="k">Suspicious Token(s)</span>
           <span id="statSuspicious" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Trades (loaded)</span>
+          <span id="statTrades" class="v">-</span>
+        </div>
+        <div class="mini-card">
+          <span class="k">Net P/L (loaded)</span>
+          <span id="statNetPnl" class="v">-</span>
         </div>
       </div>
     </section>
@@ -234,6 +242,46 @@
     </section>
 
     <section class="card">
+      <h2>Trade Results</h2>
+      <p class="muted">Closed operations received from live/demo EAs and linked to each license token.</p>
+      <div class="row wrap">
+        <label>
+          Filter Token
+          <input id="tradesFilterToken" type="text" placeholder="part of token" />
+        </label>
+        <label>
+          Filter Symbol
+          <input id="tradesFilterSymbol" type="text" placeholder="XAUUSD" />
+        </label>
+        <label>
+          Limit
+          <input id="tradesLimit" type="number" min="1" max="5000" value="500" />
+        </label>
+        <button id="refreshTradesBtn" class="btn btn-primary">Load Trades</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time UTC</th>
+              <th>Token</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Lots</th>
+              <th>Result</th>
+              <th>Net P/L</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Login @ Server</th>
+              <th>Operation</th>
+            </tr>
+          </thead>
+          <tbody id="tradesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Validate Simulation</h2>
       <div class="grid-3">
         <label>
@@ -277,6 +325,6 @@
     <span id="toast"></span>
   </footer>
 
-  <script src="/admin/app.js?v=20260311d"></script>
+  <script src="/admin/app.js?v=20260315a"></script>
 </body>
 </html>

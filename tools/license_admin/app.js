@@ -7,6 +7,7 @@ const STORAGE_AUTH_USER = "insidebot_admin_auth_user";
 const state = {
   licenses: [],
   events: [],
+  trades: [],
   tokenEventsCache: {},
 };
 
@@ -90,6 +91,69 @@ function decodeUriComponentSafe(value) {
 
 function tag(text, cls) {
   return `<span class="tag ${cls}">${esc(text)}</span>`;
+}
+
+function formatFixed(value, digits = 2) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toFixed(digits);
+}
+
+function formatMoney(value, currency = "") {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  const suffix = String(currency || "").trim();
+  return `${num.toFixed(2)}${suffix ? ` ${suffix}` : ""}`;
+}
+
+function formatPrice(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num === 0) return "-";
+  const abs = Math.abs(num);
+  let digits = 2;
+  if (abs < 1) digits = 5;
+  else if (abs < 10) digits = 4;
+  else if (abs < 100) digits = 3;
+  return num.toFixed(digits).replace(/\.?0+$/, "");
+}
+
+function normalizeTradeDirection(direction) {
+  const raw = String(direction || "").trim().toUpperCase();
+  if (raw.includes("BUY")) return "BUY";
+  if (raw.includes("SELL")) return "SELL";
+  return raw || "-";
+}
+
+function tradeDirectionTag(direction) {
+  const side = normalizeTradeDirection(direction);
+  if (side === "BUY") return tag("BUY", "tag-ok");
+  if (side === "SELL") return tag("SELL", "tag-warn");
+  return tag(side, "tag-neutral");
+}
+
+function tradeResultTag(result) {
+  const code = String(result || "").trim().toUpperCase() || "-";
+  if (code === "TP") return tag("TP", "tag-ok");
+  if (code === "BE") return tag("BE", "tag-neutral");
+  if (code === "SL") return tag("SL", "tag-bad");
+  return tag(code, "tag-neutral");
+}
+
+function tradeProfitClass(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num === 0) return "amount-flat";
+  return num > 0 ? "amount-positive" : "amount-negative";
+}
+
+function formatTradeLots(trade) {
+  const total = Number(trade.total_lots || 0);
+  const base = Number(trade.lot_size || 0);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(base) && base > 0 && Math.abs(total - base) > 1e-9) {
+    return `${formatFixed(total, 2)} total / ${formatFixed(base, 2)} base`;
+  }
+  if (Number.isFinite(total) && total > 0) return formatFixed(total, 2);
+  if (Number.isFinite(base) && base > 0) return formatFixed(base, 2);
+  return "-";
 }
 
 function isLicenseExpired(license) {
@@ -444,6 +508,39 @@ function renderEvents() {
   }).join("");
 }
 
+function renderTrades() {
+  const body = $("tradesBody");
+  if (!state.trades.length) {
+    body.innerHTML = `<tr><td colspan="11">No trade results found.</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = state.trades.map((trade) => {
+    const currency = String(trade.account_currency || "").trim();
+    const netProfit = Number(trade.profit_net || 0);
+    const login = String(trade.login || "").trim() || "-";
+    const server = String(trade.server || "").trim() || "-";
+    const operationCode = String(trade.operation_code || "").trim() || "-";
+    const operationChainCode = String(trade.operation_chain_code || "").trim() || "-";
+
+    return `
+      <tr>
+        <td>${esc(formatDate(trade.exit_time || trade.event_time))}</td>
+        <td><code>${esc(trade.token || "-")}</code></td>
+        <td>${esc(trade.symbol || "-")}</td>
+        <td>${tradeDirectionTag(trade.direction)}</td>
+        <td>${esc(formatTradeLots(trade))}</td>
+        <td>${tradeResultTag(trade.result)}</td>
+        <td><span class="amount ${tradeProfitClass(netProfit)}">${esc(formatMoney(netProfit, currency))}</span></td>
+        <td>${esc(formatPrice(trade.entry_price))}</td>
+        <td>${esc(formatPrice(trade.exit_price))}</td>
+        <td>${esc(`${login} @ ${server}`)}</td>
+        <td><code>${esc(operationCode)}</code><br><span class="muted-inline">${esc(operationChainCode)}</span></td>
+      </tr>
+    `;
+  }).join("");
+}
+
 function renderSuspicious() {
   const body = $("suspiciousBody");
   const suspicious = computeSuspicious(state.events);
@@ -492,6 +589,14 @@ function renderStats() {
   }).length;
   const denied = state.events.filter((e) => !e.allowed).length;
   const suspicious = computeSuspicious(state.events).length;
+  const trades = state.trades.length;
+  const netPnl = state.trades.reduce((sum, trade) => sum + Number(trade.profit_net || 0), 0);
+  const currencies = new Set(
+    state.trades
+      .map((trade) => String(trade.account_currency || "").trim())
+      .filter(Boolean)
+  );
+  const pnlCurrency = currencies.size === 1 ? Array.from(currencies)[0] : "";
 
   $("statTotalLicenses").textContent = String(total);
   $("statActive").textContent = String(active);
@@ -500,6 +605,8 @@ function renderStats() {
   $("statEvents").textContent = String(state.events.length);
   $("statDenied").textContent = String(denied);
   $("statSuspicious").textContent = String(suspicious);
+  $("statTrades").textContent = String(trades);
+  $("statNetPnl").textContent = formatMoney(netPnl, pnlCurrency);
 }
 
 async function loadLicenses() {
@@ -530,6 +637,22 @@ async function loadEvents() {
   renderSuspicious();
   renderStats();
   toast(`Loaded ${state.events.length} activation attempt(s)`);
+}
+
+async function loadTrades() {
+  const token = $("tradesFilterToken").value.trim();
+  const symbol = $("tradesFilterSymbol").value.trim();
+  const limit = Number($("tradesLimit").value || 500);
+  const query = new URLSearchParams();
+  query.set("limit", String(limit));
+  query.set("offset", "0");
+  if (token) query.set("token", token);
+  if (symbol) query.set("symbol", symbol);
+  const data = await apiGet(`/api/v1/admin/trades?${query.toString()}`);
+  state.trades = data.items || [];
+  renderTrades();
+  renderStats();
+  toast(`Loaded ${state.trades.length} trade result(s)`);
 }
 
 async function loadTokenEvents(token) {
@@ -663,6 +786,7 @@ async function refreshAll() {
   await testConnection();
   await loadLicenses();
   await loadEvents();
+  await loadTrades();
 }
 
 function setupCardDropdowns() {
@@ -740,6 +864,14 @@ function bindEvents() {
   $("refreshEventsBtn").addEventListener("click", async () => {
     try {
       await loadEvents();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $("refreshTradesBtn").addEventListener("click", async () => {
+    try {
+      await loadTrades();
     } catch (err) {
       toast(err.message);
     }
@@ -872,6 +1004,7 @@ async function init() {
   try {
     await loadLicenses();
     await loadEvents();
+    await loadTrades();
   } catch (err) {
     toast(err.message);
   }

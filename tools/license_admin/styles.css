@@ -379,6 +379,34 @@ tr:nth-child(even) td {
   background: #3d2a09;
 }
 
+.tag-neutral {
+  color: #d9e7f7;
+  border-color: #486a90;
+  background: #10233a;
+}
+
+.amount {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.amount-positive {
+  color: #8ff0c2;
+}
+
+.amount-negative {
+  color: #ffb3b3;
+}
+
+.amount-flat {
+  color: #d9e7f7;
+}
+
+.muted-inline {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .json-box {
   margin-top: 10px;
   background: #061221;

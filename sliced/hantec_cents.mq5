@@ -103,7 +103,7 @@ input group "--- Parametros de Adicao em Flutuacao Negativa ---"
 input bool     EnableNegativeAddOn = true;       // Habilitar adicao de posicao quando estiver negativo
 input int      NegativeAddMaxEntries = 1;        // Maximo de adicoes por operacao
 input double   NegativeAddTriggerPercent = 65.0; // Disparo em X% da distancia da entrada ate o SL
-input double   NegativeAddLotMultiplier = 0.6;   // Multiplicador do lote base na adicao
+input double   NegativeAddLotMultiplier = 0.6;   // Teto opcional do lote base na adicao sobre o lote calculado por risco
 input bool     NegativeAddUseSameSLTP = true;    // Usar mesmo SL/TP da operacao principal
 input bool     EnableNegativeAddTPAdjustment = true;  // Ajustar TP de todas as posicoes apos addon
 input double   NegativeAddTPDistancePercent = 100.0;  // Novo TP em % da distancia da entrada media ate o SL
@@ -1267,7 +1267,7 @@ bool PlacePreArmedReversalStopOrder(ENUM_ORDER_TYPE baseOrderType,
 
    if(baseOrderType != ORDER_TYPE_BUY && baseOrderType != ORDER_TYPE_SELL)
       return false;
-   if(baseStopLoss <= 0.0 || channelRange <= 0.0 || lotSize <= 0.0)
+   if(baseStopLoss <= 0.0 || channelRange <= 0.0)
       return false;
    if(g_tradeReversal)
       return false;
@@ -1292,12 +1292,13 @@ bool PlacePreArmedReversalStopOrder(ENUM_ORDER_TYPE baseOrderType,
    double revStopLoss = (reversalType == ORDER_TYPE_BUY) ? (revStopLossBase - slIncrement) : (revStopLossBase + slIncrement);
    double revTakeProfit = (reversalType == ORDER_TYPE_BUY) ? (entryPrice + tpDistance) : (entryPrice - tpDistance);
 
+   revStopLoss = NormalizePriceToTick(revStopLoss);
+   revTakeProfit = NormalizePriceToTick(revTakeProfit);
    if(IsFixedLotAllEntriesEnabled())
       lotSize = ResolveFixedLotAllEntries();
    else
-      lotSize = NormalizeLot(lotSize);
-   revStopLoss = NormalizePriceToTick(revStopLoss);
-   revTakeProfit = NormalizePriceToTick(revTakeProfit);
+      lotSize = CalculateLotSize(reversalType, entryPrice, revStopLoss, false);
+   lotSize = NormalizeLot(lotSize);
    if(lotSize <= 0.0)
       return false;
 
@@ -2341,12 +2342,16 @@ void ExecuteMarketOrder(ENUM_ORDER_TYPE orderType, double price, double stopLoss
       return;
    }
 
-   double lotSize = CalculateLotSize(price, stopLoss, isPCMContext);
-
    stopLoss = NormalizePriceToTick(stopLoss);
    takeProfit = NormalizePriceToTick(takeProfit);
    price = NormalizePriceToTick(price);
+   double lotSize = CalculateLotSize(orderType, price, stopLoss, isPCMContext);
    lotSize = NormalizeLot(lotSize);
+   if(lotSize <= 0.0)
+   {
+      Print(" Ordem a mercado cancelada - lote calculado excede o risco/margem permitidos.");
+      return;
+   }
 
    if(!IsProjectedDrawdownWithinLimits("ExecuteMarketOrder",
                                        DD_QUEUE_FIRST,
@@ -2445,13 +2450,17 @@ void PlaceLimitOrder(ENUM_ORDER_TYPE orderType,
       limitPrice = (takeProfit + MinRiskReward * stopLoss) / (MinRiskReward + 1.0); // Formula RR
 
    double lotSize = lotOverride;
-   if(lotSize <= 0.0)
-      lotSize = CalculateLotSize(limitPrice, stopLoss, isPCMContext);
-
    limitPrice = NormalizePriceToTick(limitPrice);
    stopLoss = NormalizePriceToTick(stopLoss);
    takeProfit = NormalizePriceToTick(takeProfit);
+   if(lotSize <= 0.0)
+      lotSize = CalculateLotSize(orderType, limitPrice, stopLoss, isPCMContext);
    lotSize = NormalizeLot(lotSize);
+   if(lotSize <= 0.0)
+   {
+      Print(" Ordem LIMIT cancelada - lote calculado excede o risco/margem permitidos.");
+      return;
+   }
 
    int ddCandidatePriority = DD_QUEUE_FIRST;
    if(pendingContext == PENDING_CONTEXT_REVERSAL || pendingContext == PENDING_CONTEXT_OVERNIGHT_REVERSAL)
@@ -2880,31 +2889,162 @@ double ResolveRiskPercentForEntry(bool isPCMContext = false)
    return RiskPercent;
 }
 
-double CalculateLotSize(double entryPrice, double stopLoss, bool isPCMContext = false)
+bool ResolveEntryOrderDirectionForRisk(ENUM_ORDER_TYPE orderType, ENUM_ORDER_TYPE &entryDirection);
+double CalculateOrderRiskToStopLoss(string symbol,
+                                    ENUM_ORDER_TYPE orderType,
+                                    double volume,
+                                    double entryPrice,
+                                    double stopLoss);
+
+int GetLotDigits()
+{
+   if(g_lotStep <= 0.0)
+      return 2;
+
+   double step = g_lotStep;
+   int digits = 0;
+   while(digits < 8 && MathAbs(step - MathRound(step)) > 0.00000001)
+   {
+      step *= 10.0;
+      digits++;
+   }
+
+   return digits;
+}
+
+double NormalizeLotDown(double lot)
+{
+   if(lot <= 0.0 || g_lotStep <= 0.0 || g_maxLot <= 0.0)
+      return 0.0;
+
+   if(lot > g_maxLot)
+      lot = g_maxLot;
+
+   lot = MathFloor((lot / g_lotStep) + 0.000000001) * g_lotStep;
+   if(lot < 0.0)
+      lot = 0.0;
+
+   return NormalizeDouble(lot, GetLotDigits());
+}
+
+double ResolveRiskReferenceBalance()
+{
+   double riskReferenceBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(UseInitialDepositForRisk && g_initialAccountBalance > 0.0)
+      riskReferenceBalance = g_initialAccountBalance;
+   return riskReferenceBalance;
+}
+
+double ResolveRiskAmountForEntry(bool isPCMContext = false)
+{
+   double riskReferenceBalance = ResolveRiskReferenceBalance();
+   double riskPercentToUse = ResolveRiskPercentForEntry(isPCMContext);
+   if(riskReferenceBalance <= 0.0 || riskPercentToUse <= 0.0)
+      return 0.0;
+
+   return riskReferenceBalance * (riskPercentToUse / 100.0);
+}
+
+double CalculateMarginRequiredForEntry(ENUM_ORDER_TYPE orderType,
+                                       double entryPrice,
+                                       double volume)
+{
+   if(volume <= 0.0 || entryPrice <= 0.0)
+      return 0.0;
+
+   ENUM_ORDER_TYPE entryDirection;
+   if(!ResolveEntryOrderDirectionForRisk(orderType, entryDirection))
+      return 0.0;
+
+   double marginRequired = 0.0;
+   if(OrderCalcMargin(entryDirection, _Symbol, volume, entryPrice, marginRequired) &&
+      marginRequired > 0.0)
+   {
+      return marginRequired;
+   }
+
+   long leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
+   if(leverage <= 0 || g_contractSize <= 0.0)
+      return 0.0;
+
+   return (volume * entryPrice * g_contractSize) / leverage;
+}
+
+double LimitLotByAvailableMargin(ENUM_ORDER_TYPE orderType,
+                                 double entryPrice,
+                                 double desiredLot)
+{
+   desiredLot = NormalizeLotDown(desiredLot);
+   if(desiredLot <= 0.0)
+      return 0.0;
+
+   double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   double marginBudget = freeMargin * 0.8;
+   if(marginBudget <= 0.0)
+      return 0.0;
+
+   double requiredMargin = CalculateMarginRequiredForEntry(orderType, entryPrice, desiredLot);
+   if(requiredMargin <= 0.0 || requiredMargin <= marginBudget)
+      return desiredLot;
+
+   double cappedLot = desiredLot * (marginBudget / requiredMargin);
+   cappedLot = NormalizeLotDown(cappedLot);
+   while(cappedLot >= g_minLot)
+   {
+      double cappedMargin = CalculateMarginRequiredForEntry(orderType, entryPrice, cappedLot);
+      if(cappedMargin <= 0.0 || cappedMargin <= marginBudget)
+         return cappedLot;
+
+      cappedLot = NormalizeLotDown(cappedLot - g_lotStep);
+   }
+
+   return 0.0;
+}
+
+double CalculateLotSize(ENUM_ORDER_TYPE orderType,
+                        double entryPrice,
+                        double stopLoss,
+                        bool isPCMContext = false)
 {
    double fixedLot = ResolveFixedLotAllEntries();
    if(fixedLot > 0.0)
       return fixedLot;
 
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskReferenceBalance = balance;
-   if(UseInitialDepositForRisk && g_initialAccountBalance > 0.0)
-      riskReferenceBalance = g_initialAccountBalance;
-   double riskPercentToUse = ResolveRiskPercentForEntry(isPCMContext);
-   double riskAmount = riskReferenceBalance * (riskPercentToUse / 100.0);
-   double points = MathAbs(entryPrice - stopLoss) / g_pointValue;
+   if(entryPrice <= 0.0 || stopLoss <= 0.0)
+      return 0.0;
 
-   if(points <= 0) return g_minLot;
+   double riskAmount = ResolveRiskAmountForEntry(isPCMContext);
+   if(riskAmount <= 0.0)
+      return 0.0;
 
-   double valuePerPoint = g_contractSize * g_pointValue * g_tickValue;
-   double lot = riskAmount / (points * valuePerPoint);
+   double riskPerLot = CalculateOrderRiskToStopLoss(_Symbol, orderType, 1.0, entryPrice, stopLoss);
+   if(riskPerLot <= 0.0)
+      return 0.0;
 
-   long leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
-   double marginRequired = (lot * entryPrice * g_contractSize) / leverage;
-   double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   double lot = NormalizeLotDown(riskAmount / riskPerLot);
+   double riskTolerance = MathMax(0.01, riskAmount * 0.001);
+   if(lot < g_minLot)
+   {
+      double minLotRisk = CalculateOrderRiskToStopLoss(_Symbol, orderType, g_minLot, entryPrice, stopLoss);
+      if(minLotRisk <= 0.0 || minLotRisk > (riskAmount + riskTolerance))
+         return 0.0;
 
-   if(marginRequired > freeMargin * 0.8)
-      lot = (freeMargin * 0.8 * leverage) / (entryPrice * g_contractSize);
+      lot = NormalizeDouble(g_minLot, GetLotDigits());
+   }
+
+   lot = LimitLotByAvailableMargin(orderType, entryPrice, lot);
+   if(lot < g_minLot)
+      return 0.0;
+
+   double finalRisk = CalculateOrderRiskToStopLoss(_Symbol, orderType, lot, entryPrice, stopLoss);
+   while(lot >= g_minLot && finalRisk > (riskAmount + riskTolerance))
+   {
+      lot = NormalizeLotDown(lot - g_lotStep);
+      if(lot < g_minLot)
+         return 0.0;
+
+      finalRisk = CalculateOrderRiskToStopLoss(_Symbol, orderType, lot, entryPrice, stopLoss);
+   }
 
    return lot;
 }
@@ -2914,12 +3054,41 @@ double CalculateLotSize(double entryPrice, double stopLoss, bool isPCMContext = 
 //+------------------------------------------------------------------+
 double NormalizeLot(double lot)
 {
+   if(lot <= 0.0)
+      return 0.0;
+
+   if(g_lotStep <= 0.0)
+      return NormalizeDouble(lot, 2);
+
    if(lot < g_minLot) lot = g_minLot;
    if(lot > g_maxLot) lot = g_maxLot;
 
-   lot = MathFloor(lot / g_lotStep) * g_lotStep;
+   lot = MathFloor((lot / g_lotStep) + 0.000000001) * g_lotStep;
 
-   return NormalizeDouble(lot, 2);
+   return NormalizeDouble(lot, GetLotDigits());
+}
+
+double ResolveNegativeAddLotSize(ENUM_ORDER_TYPE orderType,
+                                 double baseLot,
+                                 double entryPrice,
+                                 double stopLoss)
+{
+   if(IsFixedLotAllEntriesEnabled())
+      return ResolveFixedLotAllEntries();
+
+   double riskLot = CalculateLotSize(orderType, entryPrice, stopLoss, false);
+   if(riskLot <= 0.0)
+      return 0.0;
+
+   if(baseLot > 0.0 && NegativeAddLotMultiplier > 0.0)
+   {
+      // Mantem o multiplicador de addon apenas como teto opcional; o risco continua vindo do SL.
+      double cappedLot = NormalizeLot(baseLot * NegativeAddLotMultiplier);
+      if(cappedLot >= g_minLot && cappedLot < riskLot)
+         return cappedLot;
+   }
+
+   return riskLot;
 }
 
 //+------------------------------------------------------------------+
@@ -4950,14 +5119,6 @@ bool PlaceNegativeAddOnLimitOrdersForStrictMode(double referenceEntryPrice)
    if(triggerStepFraction <= 0.0)
       return false;
 
-   double addLot = 0.0;
-   if(IsFixedLotAllEntriesEnabled())
-      addLot = ResolveFixedLotAllEntries();
-   else
-      addLot = NormalizeLot(baseLot * NegativeAddLotMultiplier);
-   if(addLot <= 0.0)
-      return false;
-
    double riskDistance = MathAbs(referenceEntryPrice - g_firstTradeStopLoss);
    if(riskDistance <= 0.0)
       return false;
@@ -5002,6 +5163,20 @@ bool PlaceNegativeAddOnLimitOrdersForStrictMode(double referenceEntryPrice)
       {
          stopLoss = NormalizePriceToTick(g_firstTradeStopLoss);
          takeProfit = NormalizePriceToTick(g_firstTradeTakeProfit);
+      }
+
+      double addLot = ResolveNegativeAddLotSize(g_currentOrderType,
+                                                baseLot,
+                                                limitPrice,
+                                                (stopLoss > 0.0) ? stopLoss : g_firstTradeStopLoss);
+      addLot = NormalizeLot(addLot);
+      if(addLot <= 0.0)
+      {
+         LogNegativeAddDebug(59,
+                             "strict addon lot skipped step=" + IntegerToString(step) +
+                             " | entry=" + DoubleToString(limitPrice, 2) +
+                             " | sl=" + DoubleToString((stopLoss > 0.0) ? stopLoss : g_firstTradeStopLoss, 2));
+         continue;
       }
 
       bool validOrder = false;
@@ -5506,23 +5681,6 @@ bool TryExecuteNegativeAddOn()
       return false;
    }
 
-   double addLot = 0.0;
-   if(IsFixedLotAllEntriesEnabled())
-      addLot = ResolveFixedLotAllEntries();
-   else
-      addLot = NormalizeLot(baseLot * NegativeAddLotMultiplier);
-   if(addLot <= 0.0)
-   {
-      string lotDebug = "invalid add lot: base=" + DoubleToString(baseLot, 2);
-      if(IsFixedLotAllEntriesEnabled())
-         lotDebug += " fixed=" + DoubleToString(FixedLotAllEntries, 2);
-      else
-         lotDebug += " mult=" + DoubleToString(NegativeAddLotMultiplier, 2);
-      lotDebug += " norm=" + DoubleToString(addLot, 2);
-      LogNegativeAddDebug(12, lotDebug);
-      return false;
-   }
-
    double stopLoss = 0.0;
    double takeProfit = 0.0;
    if(NegativeAddUseSameSLTP)
@@ -5534,6 +5692,24 @@ bool TryExecuteNegativeAddOn()
    double ddStopLoss = stopLoss;
    if(ddStopLoss <= 0.0)
       ddStopLoss = g_firstTradeStopLoss;
+
+   double addLot = ResolveNegativeAddLotSize(g_currentOrderType,
+                                             baseLot,
+                                             currentPrice,
+                                             ddStopLoss);
+   addLot = NormalizeLot(addLot);
+   if(addLot <= 0.0)
+   {
+      string lotDebug = "invalid add lot: base=" + DoubleToString(baseLot, 2);
+      if(IsFixedLotAllEntriesEnabled())
+         lotDebug += " fixed=" + DoubleToString(FixedLotAllEntries, 2);
+      else
+         lotDebug += " mult=" + DoubleToString(NegativeAddLotMultiplier, 2);
+      lotDebug += " entry=" + DoubleToString(currentPrice, 2);
+      lotDebug += " sl=" + DoubleToString(ddStopLoss, 2);
+      LogNegativeAddDebug(12, lotDebug);
+      return false;
+   }
 
    if(!IsProjectedDrawdownWithinLimits("CheckNegativeAddOn",
                                        DD_QUEUE_ADON,
@@ -7311,7 +7487,8 @@ void ExecuteReversal()
 
    stopLoss = NormalizePriceToTick(stopLoss);
    takeProfit = NormalizePriceToTick(takeProfit);
-   double lotSize = IsFixedLotAllEntriesEnabled() ? ResolveFixedLotAllEntries() : NormalizeLot(g_firstTradeLotSize);
+   double lotSize = IsFixedLotAllEntriesEnabled() ? ResolveFixedLotAllEntries() : CalculateLotSize(reversalType, price, stopLoss, false);
+   lotSize = NormalizeLot(lotSize);
    if(lotSize <= 0.0)
    {
       Print(" turnof cancelada - Lote invalido: ", lotSize);
@@ -7400,6 +7577,7 @@ void ExecuteReversal()
       AdoptOperationChainId(reversalChainId);
       ResetNegativeAddState();
       ResetCurrentTradeFloatingMetrics();
+      g_firstTradeLotSize = lotSize;
       g_firstTradeStopLoss = stopLoss;
       g_firstTradeTakeProfit = takeProfit;
       if(ShouldUseLimitForNegativeAddOn() && g_negativeAddRuntimeEnabled)
@@ -7488,23 +7666,21 @@ bool TryExecuteOvernightReversal(ENUM_ORDER_TYPE closedOrderType,
    double slIncrement = slDistance * (StopLossIncrement / 100.0);
    double stopLoss = (reversalType == ORDER_TYPE_BUY) ? stopLossBase - slIncrement : stopLossBase + slIncrement;
    double takeProfit = (reversalType == ORDER_TYPE_BUY) ? price + tpDistance : price - tpDistance;
+   stopLoss = NormalizePriceToTick(stopLoss);
+   takeProfit = NormalizePriceToTick(takeProfit);
 
    double lotSize = 0.0;
    if(IsFixedLotAllEntriesEnabled())
       lotSize = ResolveFixedLotAllEntries();
    else
-   {
-      lotSize = (lotSizeSnapshot > 0.0) ? lotSizeSnapshot : g_firstTradeLotSize;
-      lotSize = NormalizeLot(lotSize);
-   }
+      lotSize = CalculateLotSize(reversalType, price, stopLoss, false);
+   lotSize = NormalizeLot(lotSize);
    if(lotSize <= 0.0)
    {
       Print(" Virada overnight cancelada - Lote invalido: ", lotSize);
       return false;
    }
 
-   stopLoss = NormalizePriceToTick(stopLoss);
-   takeProfit = NormalizePriceToTick(takeProfit);
    datetime reversalEntryTime = TimeCurrent();
    int resolvedChainId = sourceOperationChainId;
    if(resolvedChainId <= 0)

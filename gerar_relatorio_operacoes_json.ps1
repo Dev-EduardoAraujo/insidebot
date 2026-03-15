@@ -367,11 +367,65 @@ function Resolve-InitialBalanceForOutput {
    return 0.0
 }
 
+function Resolve-AssetTagForOutput {
+   param(
+      [object]$RunConfig,
+      [array]$RawTrades,
+      [string]$TradesJsonPath = ""
+   )
+
+   $trades = @($RawTrades)
+   $symbol = ""
+
+   if ($null -ne $RunConfig) {
+      if ($null -ne $RunConfig.PSObject.Properties["symbol"]) {
+         $symbol = [string]$RunConfig.symbol
+      }
+   }
+
+   if ([string]::IsNullOrWhiteSpace($symbol) -and $trades.Count -gt 0) {
+      $firstTrade = $trades[0]
+      if ($null -ne $firstTrade.PSObject.Properties["symbol"]) {
+         $symbol = [string]$firstTrade.symbol
+      }
+   }
+
+   if ([string]::IsNullOrWhiteSpace($symbol) -and -not [string]::IsNullOrWhiteSpace($TradesJsonPath)) {
+      $fileName = [System.IO.Path]::GetFileName([string]$TradesJsonPath)
+      if ($fileName -match "_Trades_([^_]+)_start_") {
+         $symbol = [string]$Matches[1]
+      }
+   }
+
+   if ([string]::IsNullOrWhiteSpace($symbol)) {
+      return "UNKNOWN"
+   }
+
+   $asset = $symbol.ToUpperInvariant()
+
+   # Remove sufixos de broker apos ponto (ex.: XAUUSD.h -> XAUUSD, US500.m -> US500)
+   if ($asset.Contains(".")) {
+      $asset = $asset.Split(".")[0]
+   }
+
+   # Mantem apenas caracteres alfanumericos para nome de pasta.
+   $asset = [regex]::Replace($asset, "[^A-Z0-9]", "")
+   if ([string]::IsNullOrWhiteSpace($asset)) {
+      return "UNKNOWN"
+   }
+
+   switch -regex ($asset) {
+      "^(US500|SPX500|S&P500)$" { return "SP500" }
+      default { return $asset }
+   }
+}
+
 function Resolve-StandardOutputPath {
    param(
       [object]$RunConfig,
       [object]$TickDrawdown,
-      [array]$RawTrades
+      [array]$RawTrades,
+      [string]$TradesJsonPath = ""
    )
 
    $useInitialDeposit = $false
@@ -386,8 +440,9 @@ function Resolve-StandardOutputPath {
    if ($initialBalance -le 0.0) { $initialBalance = 100000.0 }
    $capitalTag = Format-CapitalTag -BalanceValue $initialBalance
    $periodTag = Resolve-PeriodTagForOutput -RunConfig $RunConfig -RawTrades $RawTrades
+   $assetTag = Resolve-AssetTagForOutput -RunConfig $RunConfig -RawTrades $RawTrades -TradesJsonPath $TradesJsonPath
 
-   return ("docs/relatorios/operacoes/{0}-{1}{2}.md" -f $periodTag, $modeTag, $capitalTag)
+   return ("docs/relatorios/operacoes/{0}/{1}/{2}-{3}.md" -f $assetTag, $capitalTag, $periodTag, $modeTag)
 }
 
 function Get-Median {
@@ -1541,7 +1596,7 @@ $defaultOutputPath = "docs/relatorios/operacoes/RELATORIO_OPERACOES_JSON.md"
 $normalizedOutputPath = ([string]$OutputPath).Trim() -replace '/', '\'
 $normalizedDefaultOutputPath = $defaultOutputPath -replace '/', '\'
 if ([string]::IsNullOrWhiteSpace($OutputPath) -or $normalizedOutputPath.Equals($normalizedDefaultOutputPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-   $OutputPath = Resolve-StandardOutputPath -RunConfig $runConfig -TickDrawdown $tickDrawdownData -RawTrades $rawTrades
+   $OutputPath = Resolve-StandardOutputPath -RunConfig $runConfig -TickDrawdown $tickDrawdownData -RawTrades $rawTrades -TradesJsonPath $JsonPath
 }
 
 $resolvedNoTradesPath = Resolve-NoTradesJsonPath -TradesPath $JsonPath -ExplicitNoTradesPath $NoTradesJsonPath
@@ -1670,7 +1725,9 @@ for ($tradeIndex = 0; $tradeIndex -lt $rawTrades.Count; $tradeIndex++) {
    $hasFirstOperationProp = ($null -ne $t.PSObject.Properties["is_first_operation"])
    $isFirstOperationValue = if ($hasFirstOperationProp) { Is-True $t.is_first_operation } else { -not $isTurnOperationValue }
    $hasAddOperationProp = ($null -ne $t.PSObject.Properties["is_add_operation"])
-   $isAddOperationValue = if ($hasAddOperationProp) { Is-True $t.is_add_operation } else { $hasAddOnValue }
+   # Se o JSON ja informa is_add_operation, respeitar esse valor.
+   # Nao inferir "add" apenas por haver addon_count no ciclo, pois first_op pode ter addon e continuar sendo first_op.
+   $isAddOperationValue = if ($hasAddOperationProp) { Is-True $t.is_add_operation } else { $false }
    $operationCodeRaw = if ($null -ne $t.PSObject.Properties["operation_code"]) { [string]$t.operation_code } else { "" }
    $addOperationCodeRaw = if ($null -ne $t.PSObject.Properties["add_operation_code"]) { [string]$t.add_operation_code } else { "" }
    if (-not $isPcmOperationValue -and -not [string]::IsNullOrWhiteSpace($operationCodeRaw)) {
@@ -1692,15 +1749,11 @@ for ($tradeIndex = 0; $tradeIndex -lt $rawTrades.Count; $tradeIndex++) {
          $entryVsAddOnDiff = [math]::Abs($entryPriceValue - $addOnAvgEntryValue)
       }
    }
-   $looksLikePureAddTicket = ($addOnCountValue -gt 0) -and (($profitVsAddOnDiff -le 0.01) -or ($entryVsAddOnDiff -le 0.01))
+   $looksLikePureAddTicket = ($addOnCountValue -gt 0) -and (($profitVsAddOnDiff -le 0.01) -and ($entryVsAddOnDiff -le 0.01))
 
-   # Recupera classificacao de add quando JSON vier inconsistente.
-   if (-not $isAddOperationValue -and ($hasAddCodeHint -or $looksLikePureAddTicket)) {
+   # Fallback de classificacao somente quando o JSON nao trouxe explicitamente is_add_operation.
+   if (-not $hasAddOperationProp -and -not $isAddOperationValue -and ($hasAddCodeHint -or $looksLikePureAddTicket)) {
       $isAddOperationValue = $true
-   }
-   # Protege contra falso positivo quando nao ha nenhum indicio de ticket add.
-   if ($isAddOperationValue -and -not ($hasAddCodeHint -or $looksLikePureAddTicket)) {
-      $isAddOperationValue = $false
    }
    if ($isPcmOperationValue) {
       $isFirstOperationValue = $false

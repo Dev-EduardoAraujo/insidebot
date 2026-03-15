@@ -1808,6 +1808,43 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
         super().end_headers()
+
+    def send_json(self, status_code, payload):
+        self.send_response(status_code)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+
+    def get_reports_root(self):
+        return Path(self.project_root, self.reports_dir).resolve()
+
+    def resolve_report_path(self, report_path):
+        if report_path is None:
+            raise ValueError('Missing path parameter')
+
+        reports_root = self.get_reports_root()
+        candidate = Path(str(report_path))
+        if not candidate.is_absolute():
+            candidate = reports_root / candidate
+        candidate = candidate.resolve()
+
+        if reports_root != candidate and reports_root not in candidate.parents:
+            raise ValueError('Invalid report path')
+        return candidate
+
+    def build_report_meta(self, file_path):
+        reports_root = self.get_reports_root()
+        rel_path = str(file_path.relative_to(reports_root)).replace('\\', '/')
+        path_parts = rel_path.split('/')
+        asset = path_parts[0] if len(path_parts) >= 2 else "ROOT"
+        initial_balance = path_parts[1] if len(path_parts) >= 3 else "ROOT"
+        return {
+            'name': rel_path,
+            'path': str(file_path.resolve()),
+            'relative_path': rel_path,
+            'asset': asset,
+            'initial_balance': initial_balance,
+        }
     
     def do_GET(self):
         """Handle GET requests"""
@@ -1824,52 +1861,111 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.send_error(400, 'Missing path parameter')
         else:
             super().do_GET()
+
+    def do_POST(self):
+        """Handle POST requests"""
+        parsed_path = urlparse(self.path)
+
+        if parsed_path.path not in ('/api/report/rename', '/api/report/delete'):
+            self.send_error(404, 'Not found')
+            return
+
+        content_len = int(self.headers.get('Content-Length', '0') or 0)
+        raw_body = self.rfile.read(content_len) if content_len > 0 else b'{}'
+        try:
+            payload = json.loads(raw_body.decode('utf-8'))
+        except Exception:
+            self.send_json(400, {'ok': False, 'error': 'invalid_json'})
+            return
+
+        if parsed_path.path == '/api/report/rename':
+            self.handle_report_rename(payload)
+            return
+        if parsed_path.path == '/api/report/delete':
+            self.handle_report_delete(payload)
+            return
     
     def handle_reports_list(self):
         """Return list of available reports"""
         reports = []
         
-        reports_path = os.path.join(self.project_root, self.reports_dir)
+        reports_path = self.get_reports_root()
         print(f'Looking for reports in: {reports_path}')
         
-        if os.path.exists(reports_path):
-            files = os.listdir(reports_path)
-            print(f'Found {len(files)} files in directory')
-            for file in files:
-                if file.endswith('.md'):
-                    full_path = os.path.join(reports_path, file)
-                    reports.append({
-                        'name': file,
-                        'path': full_path
-                    })
-                    print(f'Added report: {file}')
+        if reports_path.exists():
+            md_files = sorted(reports_path.rglob('*.md'))
+            print(f'Found {len(md_files)} report file(s) recursively')
+            for file_path in md_files:
+                reports.append(self.build_report_meta(file_path))
         else:
             print(f'Reports directory does not exist: {reports_path}')
         
-        reports.sort(key=lambda x: x['name'], reverse=True)
+        reports.sort(key=lambda x: x.get('relative_path', x.get('name', '')).lower(), reverse=True)
         print(f'Returning {len(reports)} reports')
-        
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(reports, ensure_ascii=False).encode('utf-8'))
+        self.send_json(200, reports)
     
     def handle_report_data(self, report_path):
         """Parse and return report data"""
         try:
-            if not os.path.exists(report_path):
-                self.send_error(404, f'Report not found: {report_path}')
+            resolved_path = self.resolve_report_path(report_path)
+            if not resolved_path.exists():
+                self.send_error(404, f'Report not found: {resolved_path}')
                 return
                 
-            data = ReportParser.parse_report(report_path)
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+            data = ReportParser.parse_report(str(resolved_path))
+            self.send_json(200, data)
         except Exception as e:
             print(f'Error parsing report: {str(e)}')
             self.send_error(500, f'Error parsing report: {str(e)}')
+
+    def handle_report_rename(self, payload):
+        try:
+            old_path = self.resolve_report_path(payload.get('path'))
+            if not old_path.exists() or not old_path.is_file():
+                self.send_json(404, {'ok': False, 'error': 'report_not_found'})
+                return
+
+            new_name = str(payload.get('new_name') or '').strip()
+            if not new_name:
+                self.send_json(400, {'ok': False, 'error': 'missing_new_name'})
+                return
+            if '/' in new_name or '\\' in new_name:
+                self.send_json(400, {'ok': False, 'error': 'invalid_new_name'})
+                return
+            if not new_name.lower().endswith('.md'):
+                new_name += '.md'
+
+            new_path = old_path.with_name(new_name).resolve()
+            reports_root = self.get_reports_root()
+            if reports_root != new_path and reports_root not in new_path.parents:
+                self.send_json(400, {'ok': False, 'error': 'invalid_target_path'})
+                return
+            if new_path.exists():
+                self.send_json(409, {'ok': False, 'error': 'target_exists'})
+                return
+
+            old_path.rename(new_path)
+            self.send_json(200, {'ok': True, 'report': self.build_report_meta(new_path)})
+        except ValueError as e:
+            self.send_json(400, {'ok': False, 'error': str(e)})
+        except Exception as e:
+            print(f'Error renaming report: {str(e)}')
+            self.send_json(500, {'ok': False, 'error': 'rename_failed', 'message': str(e)})
+
+    def handle_report_delete(self, payload):
+        try:
+            report_path = self.resolve_report_path(payload.get('path'))
+            if not report_path.exists() or not report_path.is_file():
+                self.send_json(404, {'ok': False, 'error': 'report_not_found'})
+                return
+
+            report_path.unlink()
+            self.send_json(200, {'ok': True})
+        except ValueError as e:
+            self.send_json(400, {'ok': False, 'error': str(e)})
+        except Exception as e:
+            print(f'Error deleting report: {str(e)}')
+            self.send_json(500, {'ok': False, 'error': 'delete_failed', 'message': str(e)})
 
 
 def main():
